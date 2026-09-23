@@ -78,7 +78,7 @@ const dash='<span class="dim">–</span>';
 const signed=v=>v==null?dash:`<span class="${v>=0?'pos':'neg'}">${pct(v,2)}</span>`;
 
 /* ---------- table columns per tab ---------- */
-const nameCol={key:"name",label:"Name",sticky:true,val:s=>s.name.toLowerCase(),
+const nameCol={key:"name",label:"Company",sticky:true,val:s=>s.name.toLowerCase(),
   cell:s=>`<div class="name">${flag(s.country)}<div><a href="#" data-open="${esc(s.ticker)}">${esc(s.name)}</a><small>${esc(s.ticker)}</small></div></div>`};
 const toolsCol={key:"tools",label:'<span class="vh">Remove</span>',cls:"col-tools",nosort:true,
   cell:s=>`<button class="icon-btn" data-remove="${esc(s.ticker)}" aria-label="Remove ${esc(s.name)} from list"><svg><use href="#i-trash"/></svg></button>`};
@@ -120,7 +120,7 @@ function renderTable(){
   $("rows").innerHTML=cos.map(s=>`<tr data-open="${esc(s.ticker)}">${cols.map(c=>`<td class="${cls(c)}" ${c.left?'style="text-align:left"':''}>${c.cell(s)}</td>`).join("")}</tr>`).join("");
   if(tab==="price"){$("tfoot").innerHTML="";return}
   $("tfoot").innerHTML="<tr>"+cols.map((c,i)=>{
-    if(i===0) return `<td class="sticky">Average, all stocks</td>`;
+    if(i===0) return `<td class="sticky">Average, all companies</td>`;
     if(!c.avg) return `<td class="${cls(c)}"></td>`;
     const v=cos.map(c.raw).filter(x=>x!=null); if(!v.length) return `<td>${dash}</td>`;
     const m=v.reduce((p,q)=>p+q,0)/v.length;

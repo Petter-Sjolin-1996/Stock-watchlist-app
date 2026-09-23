@@ -17,3 +17,4 @@ Actuals annual). The app reads rows by their labels, not by cell addresses.
 ## Status
 
 - v0.1: watchlist page with placeholder prices; Hexatronic valuation from transfer sheet v3.
+- v0.2: multiple watchlists (create, switch, rename, delete with double confirmation), search-and-add, day change in % or SEK, sortable columns, next report column, blue theme.

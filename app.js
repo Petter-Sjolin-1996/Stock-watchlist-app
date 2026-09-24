@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const TODAY=new Date(2026,8,23);
+const TODAY=new Date(); TODAY.setHours(0,0,0,0);
 
 /* ---------- company data ----------
    [ticker, name, country, price, day change] */
@@ -36,7 +36,7 @@ function placeholderKpi(t,price){const r=rng(hash(t)+7);
   return [Math.round(30000+r()*600000),Math.round(r()*55)/1000,.12+r()*.2,+(0.6+r()*1.1).toFixed(2),+(10+r()*25).toFixed(2),+(0.8+r()*6).toFixed(2),+(1.2+r()*6).toFixed(2),.05+r()*.3]}
 function placeholderHist(t,day){const r=rng(hash(t)+11),g=s=>(r()-0.45)*s;
   return [day,g(.06),g(.12),g(.2),g(.3),g(.35),g(.45),g(.9),g(1.2)]}
-function info(t){
+function demoInfo(t){
   if(MODELS[t]){const m=MODELS[t],h=[m.day,null,null,null,null,m.price/HX.ytdStart-1,null,null,null];
     return Object.assign({ticker:t,hist:h},m)}
   const o=OMX.find(x=>x[0]===t); if(!o) return null;
@@ -45,6 +45,50 @@ function info(t){
     kpi:real?real.kpi:placeholderKpi(t,o[3]),hist:real?real.hist:placeholderHist(t,o[4])};
 }
 const UNIVERSE=[["HTRO","Hexatronic Group"],...OMX.map(o=>[o[0],o[1]])];
+
+/* ---------- live market data: written nightly by the workflow in the private data repo ---------- */
+const GH_KEY="mm-github", MKT_KEY="mm-market";
+let gh={owner:"Petter-Sjolin-1996",repo:"Stock-watchlist-data",token:""};
+try{Object.assign(gh,JSON.parse(localStorage.getItem(GH_KEY)||"{}"))}catch(e){}
+let MARKET=null;
+try{MARKET=JSON.parse(localStorage.getItem(MKT_KEY)||"null")}catch(e){}
+if(!gh.token) MARKET=null;
+let marketError="";
+const KPI_KEYS=["mcap","dy","vol","beta","pe","ps","pb","roe"], HIST_KEYS=["1d","1w","1m","3m","6m","ytd","1y","3y","5y"];
+function info(t){
+  const s=demoInfo(t); if(!s) return null;
+  if(!MARKET) return s;
+  const m=MARKET.stocks&&MARKET.stocks[t];
+  Object.assign(s,{price:null,day:null,kpi:KPI_KEYS.map(()=>null),hist:HIST_KEYS.map(()=>null),report:s.value!=null?s.report:null});
+  if(!m) return s;
+  s.price=m.price??null; s.day=m.day??null;
+  s.kpi=KPI_KEYS.map(k=>m.kpi&&m.kpi[k]!=null?m.kpi[k]:null);
+  s.hist=HIST_KEYS.map(k=>m.hist&&m.hist[k]!=null?m.hist[k]:null);
+  if(m.nextReport) s.report=m.nextReport;
+  return s;
+}
+async function loadMarket(showToast){
+  if(!gh.token){MARKET=null;marketError="";renderAll();return false}
+  try{
+    const r=await fetch(`https://api.github.com/repos/${encodeURIComponent(gh.owner)}/${encodeURIComponent(gh.repo)}/contents/market.json`,
+      {headers:{Authorization:`Bearer ${gh.token}`,Accept:"application/vnd.github.raw+json","X-GitHub-Api-Version":"2022-11-28"},cache:"no-store"});
+    if(!r.ok) throw new Error(r.status===401?"GitHub did not accept the token. Check it in Settings.":
+      r.status===404?"No market data yet. Run the 'Update market data' workflow in the data repo.":`GitHub returned error ${r.status}.`);
+    const d=await r.json();
+    if(!d||!d.stocks) throw new Error("market.json has an unexpected format.");
+    MARKET=d; marketError="";
+    try{localStorage.setItem(MKT_KEY,JSON.stringify(d))}catch(e){}
+    renderAll(); if(showToast) toast(`Prices loaded (close ${fmtDate(d.asOf)})`);
+    return true;
+  }catch(e){
+    marketError=e.message||"Could not load market data."; renderAll(); if(showToast) toast(marketError); return false;
+  }
+}
+function renderStatus(){
+  const el=$("data-status"); if(!el) return;
+  if(MARKET) el.innerHTML=`Prices and key figures: end of day ${esc(fmtDate(MARKET.asOf))}, from Yahoo Finance (updated every weekday evening).${marketError?` <b class="neg">${esc(marketError)}</b>`:""}`;
+  else el.innerHTML=marketError?`<b class="neg">${esc(marketError)}</b> Showing demo data.`:"Showing demo data. Connect GitHub under Settings to load real prices.";
+}
 
 /* ---------- flags (round, like Avanza) ---------- */
 const FLAGS={
@@ -82,18 +126,18 @@ const nameCol={key:"name",label:"Company",sticky:true,val:s=>s.name.toLowerCase(
   cell:s=>`<div class="name">${flag(s.country)}<div><a href="#" data-open="${esc(s.ticker)}">${esc(s.name)}</a><small>${esc(s.ticker)}</small></div></div>`};
 const toolsCol={key:"tools",label:'<span class="vh">Remove</span>',cls:"col-tools",nosort:true,
   cell:s=>`<button class="icon-btn" data-remove="${esc(s.ticker)}" aria-label="Remove ${esc(s.name)} from list"><svg><use href="#i-trash"/></svg></button>`};
-const up=s=>s.value!=null?s.value/s.price-1:null;
+const up=s=>s.value!=null&&s.price?s.value/s.price-1:null;
 const COLS={
  price:[nameCol,
-  {key:"day",label:"Day change",val:s=>unit==="pct"?s.day:s.price-s.price/(1+s.day),
-   cell:s=>{const a=s.price-s.price/(1+s.day);return `<span class="${s.day>=0?'pos':'neg'}">${unit==="pct"?pct(s.day,2):(a>0?"+":"")+fmt(a)}</span>`}},
-  {key:"price",label:"Last price",val:s=>s.price,cell:s=>fmt(s.price)},
+  {key:"day",label:"Day change",val:s=>s.day==null||s.price==null?-Infinity:unit==="pct"?s.day:s.price-s.price/(1+s.day),
+   cell:s=>{if(s.day==null||s.price==null)return dash;const a=s.price-s.price/(1+s.day);return `<span class="${s.day>=0?'pos':'neg'}">${unit==="pct"?pct(s.day,2):(a>0?"+":"")+fmt(a)}</span>`}},
+  {key:"price",label:"Last price",val:s=>s.price??-Infinity,cell:s=>s.price==null?dash:fmt(s.price)},
   {key:"value",label:"Your value",cls:"col-val",val:s=>s.value??-Infinity,cell:s=>s.value!=null?fmt(s.value):dash},
   {key:"upside",label:"Upside",val:s=>up(s)??-Infinity,cell:s=>{const u=up(s);if(u==null)return dash;
     const w=Math.min(Math.abs(u),.5)/.5*50;
     return `<span class="up-cell"><b class="${u>=0?'pos':'neg'}" style="font-weight:600">${pct(u)}</b><span class="gap-bar" aria-hidden="true"><span style="${u>=0?`left:50%;width:${w}%`:`right:50%;width:${w}%`};background:${u>=0?'var(--up)':'var(--down)'}"></span></span></span>`}},
-  {key:"report",label:"Next report",cls:"col-report",val:s=>s.report,asc:true,
-   cell:s=>{const d=daysTo(s.report);return `<span class="${d<=30?'soon':''}">${fmtDate(s.report)}</span><br><small class="dim">in ${d} days</small>`}},
+  {key:"report",label:"Next report",cls:"col-report",val:s=>s.report||"9999",asc:true,
+   cell:s=>{if(!s.report)return dash;const d=daysTo(s.report);if(d<0)return `<span class="dim">${fmtDate(s.report)}</span>`;return `<span class="${d<=30?'soon':''}">${fmtDate(s.report)}</span><br><small class="dim">in ${d} days</small>`}},
   {key:"model",label:"Model",cls:"col-model",left:true,nosort:true,cell:s=>`<span class="status ${s.value!=null?'ok':'none'}">${s.model||'No model yet'}</span>`},
   toolsCol],
  kpi:[nameCol,
@@ -140,7 +184,7 @@ function toggleMenu(open){const m=$("list-menu");const o=open??!m.classList.cont
 function resRow(t,n){
   const s=info(t), inList=active().tickers.includes(t);
   return `<div class="res"><div style="display:flex;gap:10px;align-items:center">${flag(s.country)}<div><b style="font-weight:500">${esc(n)}</b><small>${esc(t)}${s.value!=null?' / your model':''}</small></div></div>
-    <span>${fmt(s.price)}</span>${inList?'<span class="in">In list</span>':`<button class="add-sm" data-add="${esc(t)}">Add</button>`}</div>`;
+    <span>${s.price!=null?fmt(s.price):"–"}</span>${inList?'<span class="in">In list</span>':`<button class="add-sm" data-add="${esc(t)}">Add</button>`}</div>`;
 }
 function renderResults(){
   const q=$("search").value.trim(), r=$("results");
@@ -156,7 +200,7 @@ function renderAddList(){
 
 /* ---------- dialogs ---------- */
 function openDlg(id){closeAll();$(id).classList.add("open");$("scrim").classList.add("open")}
-function closeAll(){["dlg-new","dlg-manage","dlg-add","drawer","scrim"].forEach(i=>$(i).classList.remove("open"));toggleMenu(false)}
+function closeAll(){["dlg-new","dlg-manage","dlg-add","dlg-settings","drawer","scrim"].forEach(i=>$(i).classList.remove("open"));toggleMenu(false)}
 function manageView(step){
   const a=active(), n=a.tickers.length, b=$("manage-body");
   if(step===1){
@@ -184,14 +228,14 @@ function nameError(name,exceptId){
 function openDrawer(t){
   const s=info(t); if(!s) return;
   $("d-title").textContent=s.name;
-  let h=`<div class="big"><div><small>Last price</small><b>${fmt(s.price)}</b></div>`;
+  let h=`<div class="big"><div><small>Last price</small><b>${s.price!=null?fmt(s.price):"–"}</b></div>`;
   if(s.value!=null){const u=up(s);
     h+=`<div><small>Your value</small><b>${fmt(s.value)}</b></div><div><small>Upside</small><b class="${u>=0?'pos':'neg'}">${pct(u)}</b></div></div>
-    <dl class="kv"><dt>Model</dt><dd>${s.model}</dd><dt>Valuation date</dt><dd>${s.vdate}</dd><dt>WACC</dt><dd>${s.wacc}</dd><dt>Terminal value</dt><dd>${s.terminal}</dd><dt>Next report</dt><dd>${fmtDate(s.report)}</dd></dl>
+    <dl class="kv"><dt>Model</dt><dd>${s.model}</dd><dt>Valuation date</dt><dd>${s.vdate}</dd><dt>WACC</dt><dd>${s.wacc}</dd><dt>Terminal value</dt><dd>${s.terminal}</dd><dt>Next report</dt><dd>${s.report?fmtDate(s.report):"–"}</dd></dl>
     <p class="minititle">Net sales, MSEK: actual and your forecast</p>${bars(s.sales)}
     <p class="note">The full company page, with actual vs your forecast per business area and drill-downs, is the next step.</p>`;
   } else {
-    h+=`</div><dl class="kv"><dt>Day change</dt><dd class="${s.day>=0?'pos':'neg'}">${pct(s.day,2)}</dd><dt>Next report</dt><dd>${fmtDate(s.report)}</dd></dl>
+    h+=`</div><dl class="kv"><dt>Day change</dt><dd class="${s.day>=0?'pos':'neg'}">${s.day!=null?pct(s.day,2):"–"}</dd><dt>Next report</dt><dd>${s.report?fmtDate(s.report):"–"}</dd></dl>
     <div class="emptybox"><b style="color:var(--ink)">No model yet</b><br>Upload a transfer sheet for ${esc(s.name)} to see your value, your forecast and how actual results compare.<br><br><button class="pill primary" data-soon>Upload transfer sheet</button></div>`;
   }
   $("d-body").innerHTML=h; $("drawer").classList.add("open"); $("scrim").classList.add("open");
@@ -251,6 +295,24 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeAll();$("resul
 const setUnit=u=>{unit=u;$("u-pct").setAttribute("aria-pressed",u==="pct");$("u-sek").setAttribute("aria-pressed",u==="sek");renderTable()};
 $("u-pct").onclick=()=>setUnit("pct"); $("u-sek").onclick=()=>setUnit("sek");
 
-function renderAll(){renderBanner();renderTable()}
+/* ---------- settings: GitHub connection ---------- */
+function openSettings(){
+  $("gh-owner").value=gh.owner; $("gh-repo").value=gh.repo; $("gh-token").value="";
+  $("gh-token").placeholder=gh.token?"Saved. Paste a new token to replace it":"github_pat_…";
+  $("gh-remove").hidden=!gh.token; $("gh-err").textContent=""; openDlg("dlg-settings");
+}
+$("settings-btn").onclick=openSettings;
+$("gh-save").onclick=async()=>{
+  const owner=$("gh-owner").value.trim(), repo=$("gh-repo").value.trim(), token=$("gh-token").value.trim()||gh.token;
+  if(!owner||!repo||!token){$("gh-err").textContent="Fill in owner, repository and token.";return}
+  gh={owner,repo,token}; try{localStorage.setItem(GH_KEY,JSON.stringify(gh))}catch(e){}
+  $("gh-save").disabled=true; const ok=await loadMarket(false); $("gh-save").disabled=false;
+  if(ok){closeAll();toast(`Connected. Prices from ${fmtDate(MARKET.asOf)}`)} else $("gh-err").textContent=marketError;
+};
+$("gh-remove").onclick=()=>{gh.token="";try{localStorage.setItem(GH_KEY,JSON.stringify(gh));localStorage.removeItem(MKT_KEY)}catch(e){}
+  MARKET=null;marketError="";closeAll();renderAll();toast("Token removed. Showing demo data.")};
+
+function renderAll(){renderBanner();renderTable();renderStatus()}
 renderAll();
+loadMarket(false);
 })();

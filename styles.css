@@ -43,6 +43,7 @@ h1,h2,h3{font-family:var(--serif);font-weight:700;letter-spacing:-.005em;margin:
 .card + .card{margin-top:16px}
 .pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:9px 18px;font-size:15px;white-space:nowrap}
 .pill:hover{background:var(--hover)}
+.pill[hidden]{display:none}
 .pill svg{width:17px;height:17px;flex:none}
 .pill.primary{background:var(--blue);border-color:var(--blue);color:#fff}
 .pill.primary:hover{background:var(--blue-dark)}

@@ -23,3 +23,4 @@ Actuals annual). The app reads rows by their labels, not by cell addresses.
 - v0.5: Mr. Market top bar; cache-busting version tags on styles.css and app.js.
 - v0.6: real end-of-day prices, key figures, history and report dates from Yahoo Finance via a nightly GitHub Actions job in the private data repo; Settings dialog for the GitHub connection.
 - v0.7: 'as of' date under each last price (or 'demo price' when not connected).
+- v0.8: Refresh prices button that starts the data workflow from the app and reloads when done (token needs Actions: Read and write).

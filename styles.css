@@ -166,3 +166,8 @@ tbody tr:hover td.sticky{background:var(--hover)}
   .gap-bar{width:60px}
 }
 @media (prefers-reduced-motion:reduce){.drawer,.toast{transition:none}}
+.pill.refresh{padding:7px 14px;font-size:14px;color:var(--blue)}
+.pill.refresh:disabled{opacity:.7;cursor:default}
+.pill.refresh.busy svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.pill.refresh.busy svg{animation:none}}

@@ -439,6 +439,8 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
     else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_financials.xlsx`)}
     else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
+    else if(a==="wacc-implied"){const lm=latestModel(t);if(lm){const r=MMCompany.impliedWacc(companyCtx());
+      if(r.error){toast(r.error)}else{WACC_OVERRIDE[lm.json]=r.wacc;MMCompany.updateValuation($("view-company"),companyCtx(),r.wacc)}}}
     else if(a==="wacc-reset"){const lm=latestModel(t);if(lm){delete WACC_OVERRIDE[lm.json];MMCompany.updateValuation($("view-company"),companyCtx(),MODEL_DATA[lm.json].inputs.wacc)}}
   }catch(err){toast(err.message)}
 });
@@ -498,7 +500,7 @@ async function saveModel(){
    version.json in the repo always holds the latest version. If it differs from the code that is
    running, the page reloads itself with ?v=<new version>, which makes Safari fetch fresh files.
    Runs in the background, so it never slows the app down. */
-const APP_VERSION="0.14";
+const APP_VERSION="0.16";
 let lastCheck=0;
 async function checkForUpdate(){
   if(Date.now()-lastCheck<60000) return; lastCheck=Date.now();

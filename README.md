@@ -32,3 +32,4 @@ Bump the number in four places: `version.json`, `APP_VERSION` in `app.js`, and t
 - v0.11: key chart on the company page (Revenue, EBITDA, EBIT, Net income, Free cash flow) with actual history from actuals/<TICKER>_actuals.xlsx and your forecast; CAGR arrows, margin and EPS pills; download historical data.
 - v0.12: chart redesign (fixed selector, legend top-right, notes bottom-left, no y-axis, grey actual area, thinner CAGR arrows, coloured pills), ROIC view, waterfall in the same style, Download historical data in the model card.
 - v0.13: labels of negative bars kept clear of the x-axis; CAGR n/a for negative start or end values; 'Download historical financials'.
+- v0.14: valuation card with value-per-share panel (share price, upside) and a WACC slider with reset to the model's WACC.

@@ -486,7 +486,7 @@ async function saveModel(){
    version.json in the repo always holds the latest version. If it differs from the code that is
    running, the page reloads itself with ?v=<new version>, which makes Safari fetch fresh files.
    Runs in the background, so it never slows the app down. */
-const APP_VERSION="0.11";
+const APP_VERSION="0.12";
 let lastCheck=0;
 async function checkForUpdate(){
   if(Date.now()-lastCheck<60000) return; lastCheck=Date.now();

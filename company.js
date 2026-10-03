@@ -54,7 +54,8 @@
     ebit: ["Actual years as reported, including one-offs", "Pills: EBIT margin"],
     ni: ["Forecast: EBIT minus financial costs and tax from your model", "Pills: earnings per share in SEK, forecast on today's share count"],
     fcf: ["Actual years on the same definition as your forecast", "Reported quarters: operating cash flow minus capex"],
-    roic: ["ROIC = EBIT after tax / (equity + net debt + lease liabilities), including goodwill",
+    roic: ["ROIC = EBITA after tax / operating capital, including goodwill",
+           "Operating capital = working capital + tangible assets incl. right-of-use + intangible assets, at year end",
            "Forecast capital rolled forward with capex, depreciation, amortisation and working capital",
            "New leases assumed equal to lease depreciation; acquisitions after the last report not included"]
   };
@@ -101,12 +102,13 @@
     return bars;
   }
 
-  /* ROIC: history from the actuals file; forecast capital rolled forward from the last year-end */
+  /* ROIC, operating definition: EBITA after tax / operating capital (working capital + tangible + intangible assets).
+     History from the actuals file; forecast capital rolled forward from the last year-end. */
   function roicSeries(ctx) {
     const { data, result, actuals } = ctx, A = actuals && actuals.annual, Q = actuals && actuals.quarterly;
     const bars = [];
     if (!A) return bars;
-    const roic = A.get("roic incl. goodwill"), eq = A.get("equity"), nd = A.get("net debt"), le = A.get("lease liabilities"), lp = A.get("lease payments");
+    const roic = A.get("roic"), cap = A.get("operating capital"), lp = A.get("lease payments");
     const P = data ? data.periods : [], L = data ? data.lines : {};
     const qIdx = P.map((p, i) => i).filter(i => P[i].kind === "Q");
     const curYear = qIdx.length ? P[qIdx[0]].label.slice(3) : null;
@@ -114,24 +116,22 @@
     A.periods.forEach((y, i) => {
       if (+y < 2021 || (curYear && +y >= +curYear)) return;
       if (roic[i] != null) bars.push({ label: y, actual: roic[i], forecast: null });
-      if (eq[i] != null && nd[i] != null && le[i] != null) { base = eq[i] + nd[i] + le[i]; baseYear = y; }
+      if (cap[i] != null) { base = cap[i]; baseYear = y; }
       if (lp[i] != null) leaseDep = lp[i];
     });
     if (!(data && result) || base == null) return bars;
-    let ic = base, nopat = 0, actPart = 0, hasAct = false, anyFc = false;
-    // current year: reported quarters from the actuals file, then your forecast quarters
-    let nwcPrev = A.value("working capital", baseYear);
+    const nopatFc = i => (result.ebit[i] + v0(L.amort, i)) * (1 - Math.min(0.4, Math.max(0, result.taxRate[i] || 0)));
+    let ic = base, nopat = 0, hasAct = false, anyFc = false, nwcPrev = A.value("working capital", baseYear);
     qIdx.forEach(i => {
       const lab = P[i].label;
       if (P[i].status.toLowerCase() === "reported" && Q) {
-        const ebit = Q.value("ebit", lab), tax = Q.value("income tax", lab), pbt = Q.value("profit before tax", lab);
+        const ebita = Q.value("ebita (reported)", lab), tax = Q.value("income tax", lab), pbt = Q.value("profit before tax", lab);
         const capex = Q.value("capex", lab), dep = Q.value("depreciation", lab), am = Q.value("amortisation", lab), nwc = Q.value("working capital", lab);
-        if (ebit != null) { const n = ebit * (1 - taxRate(tax || 0, pbt || 0)); nopat += n; actPart += n; hasAct = true; }
+        if (ebita != null) { nopat += ebita * (1 - taxRate(tax || 0, pbt || 0)); hasAct = true; }
         ic += (capex || 0) - (dep || 0) + leaseDep / 4 - (am || 0) + (nwc != null && nwcPrev != null ? nwc - nwcPrev : 0);
         if (nwc != null) nwcPrev = nwc;
       } else {
-        anyFc = true;
-        nopat += result.ebit[i] * (1 - Math.min(0.4, Math.max(0, result.taxRate[i] || 0)));
+        anyFc = true; nopat += nopatFc(i);
         ic += v0(L.capex, i) - v0(L.dep, i) + leaseDep / 4 - v0(L.amort, i) + v0(L.nwc, i);
       }
     });
@@ -139,7 +139,7 @@
     P.forEach((p, i) => {
       if (p.kind !== "FY" || p.status.toLowerCase() !== "forecast") return;
       ic += v0(L.capex, i) - v0(L.dep, i) + leaseDep - v0(L.amort, i) + v0(L.nwc, i);
-      bars.push({ label: p.label.replace(/^FY /, ""), actual: null, forecast: result.ebit[i] * (1 - Math.min(0.4, Math.max(0, result.taxRate[i] || 0))) / ic });
+      bars.push({ label: p.label.replace(/^FY /, ""), actual: null, forecast: nopatFc(i) / ic });
     });
     return bars;
   }
@@ -150,8 +150,9 @@
     const M = METRICS[key], pctMode = !!M.pct;
     const l = 14, r = 14, t = M.arrows ? 92 : M.bubble ? 74 : 50, b = 34, cw = W - l - r, ch = H - t - b;
     const tot = bars.map(x => (x.actual || 0) + (x.forecast || 0));
-    const hi = Math.max(0, ...tot) * 1.08 || 1, lo = Math.min(0, ...tot) * 1.15;
-    const y = v => t + (hi - v) / (hi - lo) * ch, bw = cw / bars.length, xc = i => l + bw * (i + 0.5);
+    const hi = Math.max(0, ...tot) * 1.08 || 1, lo = Math.min(0, ...tot) * 1.05;
+    const negRoom = lo < 0 ? 24 : 0, bottom = H - b - 6 - negRoom;
+    const y = v => t + (hi - v) / (hi - lo) * (bottom - t), bw = cw / bars.length, xc = i => l + bw * (i + 0.5);
     const fmtV = v => pctMode ? (v * 100).toFixed(1) + "%" : h.fmt(v, 0);
     const firstFc = bars.findIndex(x => x.forecast != null);
     let g = "";
@@ -192,8 +193,8 @@
       const seg = (i0, i1, color, gapStart, gapEnd) => {
         if (i1 <= i0) return;
         const n = +bars[i1].label - +bars[i0].label, c = cagr(tot[i0], tot[i1], n);
-        const txt = c != null ? `CAGR ${c >= 0 ? "+" : ""}${(c * 100).toFixed(1)}%` : `Average ${h.fmt(tot.slice(i0, i1 + 1).reduce((s, q) => s + q, 0) / (i1 - i0 + 1), 0)} a year`;
-        if (c == null) notes.push(`${bars[i0].label}–${bars[i1].label}: growth rate not meaningful because of a negative year, average shown`);
+        const txt = c != null ? `CAGR ${c >= 0 ? "+" : ""}${(c * 100).toFixed(1)}%` : "CAGR n/a";
+        if (c == null) notes.push(`CAGR n/a ${bars[i0].label}–${bars[i1].label}: a growth rate cannot be calculated from a negative or zero value`);
         const ay = t - 46, x1 = xc(i0) + gapStart, x2 = xc(i1) - gapEnd, xm = (x1 + x2) / 2, tw = txt.length * 7 + 20;
         g += `<line x1="${x1}" x2="${xm - tw / 2 - 6}" y1="${ay}" y2="${ay}" stroke="${color}" stroke-width="1"/>` +
              `<line x1="${xm + tw / 2 + 6}" x2="${x2}" y1="${ay}" y2="${ay}" stroke="${color}" stroke-width="1"/>` +
@@ -244,7 +245,7 @@
     </div>`;
 
     // ---- model card
-    const histBtn = ctx.hasActuals ? `<button class="pill" data-action="download-actuals"><svg><use href="#i-down"/></svg>Download historical data</button>` : "";
+    const histBtn = ctx.hasActuals ? `<button class="pill" data-action="download-actuals"><svg><use href="#i-down"/></svg>Download historical financials</button>` : "";
     const tplBtn = hasTemplate
       ? `<button class="pill" data-action="download-template"><svg><use href="#i-down"/></svg>Download transfer sheet</button>`
       : `<span class="dim small">No transfer sheet developed yet for this company</span>`;

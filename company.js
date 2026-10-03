@@ -13,24 +13,30 @@
   function niceMax(v) { const st = niceStep(v / 4); return Math.max(st, Math.ceil(v / st) * st); }
   const k = v => Math.abs(v) >= 1000 ? (v / 1000).toFixed(1).replace(/\.0$/, "") + "k" : Math.round(v).toString();
 
-  /* waterfall from cash flows to equity value */
+  /* ================= shared chart style ================= */
+  const NAVY = "#13307A", LIGHT = "#8FB6E8", RED = "#D9827C", ACT_BG = "#F3F4F6";
+  const W = 780, H = 340;
+  const label = (x, y, txt, o = {}) =>
+    `<text x="${x}" y="${y}" text-anchor="${o.anchor || "middle"}" font-size="${o.size || 12}" font-weight="${o.weight || 400}" fill="${o.fill || "var(--ink)"}"${o.ls ? ` letter-spacing="${o.ls}"` : ""}>${txt}</text>`;
+
+  /* waterfall from cash flows to equity value (same look as the key chart) */
   function waterfall(steps, h) {
-    const W = 420, H = 230, l = 10, r = 10, t = 22, b = 44, cw = W - l - r, ch = H - t - b;
+    const l = 10, r = 10, t = 34, b = 46, cw = W - l - r, ch = H - t - b;
     let run = 0, hi = 0;
     const bars = steps.map(s => {
-      if (s.total) { const bar = { ...s, from: 0, to: s.value }; run = s.value; hi = Math.max(hi, run); return bar; }
+      if (s.total) { run = s.value; hi = Math.max(hi, run); return { ...s, from: 0, to: s.value }; }
       const bar = { ...s, from: run, to: run + s.value }; run += s.value; hi = Math.max(hi, bar.from, bar.to); return bar;
     });
-    const max = niceMax(hi * 1.05), y = v => t + ch - v / max * ch, bw = cw / bars.length;
-    let g = "";
+    const y = v => t + ch - v / (hi * 1.05) * ch, bw = cw / bars.length;
+    let g = `<line x1="${l}" x2="${W - r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>`;
     bars.forEach((s, i) => {
-      const top = y(Math.max(s.from, s.to)), bot = y(Math.min(s.from, s.to));
-      const color = s.total ? "var(--ink)" : s.value >= 0 ? "var(--blue)" : "var(--down)";
-      g += `<rect x="${l + i * bw + bw * 0.15}" y="${top}" width="${bw * 0.7}" height="${Math.max(1, bot - top)}" rx="2" fill="${color}" opacity="${s.total ? 0.9 : 0.85}"/>`;
-      g += `<text x="${l + i * bw + bw / 2}" y="${top - 5}" text-anchor="middle" font-size="11" fill="var(--ink)">${k(s.value)}</text>`;
-      s.label.split("\n").forEach((part, j) => { g += `<text x="${l + i * bw + bw / 2}" y="${H - 26 + j * 13}" text-anchor="middle" font-size="10.5" fill="var(--muted)">${h.esc(part)}</text>`; });
+      const top = y(Math.max(s.from, s.to)), bot = y(Math.min(s.from, s.to)), xc = l + bw * (i + 0.5), w = bw * 0.56;
+      const color = s.total ? NAVY : s.value >= 0 ? LIGHT : RED;
+      g += `<rect x="${xc - w / 2}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${color}"/>`;
+      g += label(xc, top - 7, h.fmt(s.value, 0));
+      s.label.split("\n").forEach((part, j) => { g += label(xc, H - b + 20 + j * 15, h.esc(part), { fill: "var(--muted)" }); });
     });
-    return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="From cash flows to equity value">${g}</svg>`;
+    return `<div class="kc-scroll"><svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="From cash flows to equity value">${g}</svg></div>`;
   }
 
   /* ================= key chart: actual history + your forecast ================= */
@@ -39,23 +45,30 @@
     ebitda: { name: "EBITDA", a: "adjusted ebitda", q: "adjusted ebitda", bubble: "margin" },
     ebit: { name: "EBIT", a: "ebit", q: "ebit", bubble: "margin", oneoff: true },
     ni: { name: "Net income", a: "net income", q: "net income", bubble: "eps", oneoff: true },
-    fcf: { name: "Free cash flow", a: "free cash flow, mr. market definition", q: "free cash flow, reported", arrows: true }
+    fcf: { name: "Free cash flow", a: "free cash flow, mr. market definition", q: "free cash flow, reported", arrows: true },
+    roic: { name: "ROIC", pct: true }
   };
-  const NAVY = "#13307A", LIGHT = "#8FB6E8";
+  const NOTES = {
+    sales: ["Net sales"],
+    ebitda: ["Actual years: adjusted EBITDA, excluding one-offs", "Forecast: EBITDA from your model", "Pills: EBITDA margin"],
+    ebit: ["Actual years as reported, including one-offs", "Pills: EBIT margin"],
+    ni: ["Forecast: EBIT minus financial costs and tax from your model", "Pills: earnings per share in SEK, forecast on today's share count"],
+    fcf: ["Actual years on the same definition as your forecast", "Reported quarters: operating cash flow minus capex"],
+    roic: ["ROIC = EBIT after tax / (equity + net debt + lease liabilities), including goodwill",
+           "Forecast capital rolled forward with capex, depreciation, amortisation and working capital",
+           "New leases assumed equal to lease depreciation; acquisitions after the last report not included"]
+  };
+  const v0 = (arr, i) => (arr && arr[i] != null ? arr[i] : 0);
+  const taxRate = (tax, pbt) => (pbt > 0 ? Math.min(0.4, Math.max(0, tax / pbt)) : 0);
 
   function seriesFor(key, ctx) {
-    const { data, result, actuals } = ctx, M = METRICS[key];
-    const A = actuals && actuals.annual, Q = actuals && actuals.quarterly;
-    const P = data ? data.periods : [];
+    const { data, result, actuals } = ctx;
+    if (key === "roic") return roicSeries(ctx);
+    const M = METRICS[key], A = actuals && actuals.annual, Q = actuals && actuals.quarterly;
+    const P = data ? data.periods : [], L = data ? data.lines : {};
     const qIdx = P.map((p, i) => i).filter(i => P[i].kind === "Q");
     const curYear = qIdx.length ? P[qIdx[0]].label.slice(3) : null;
-    const L = data ? data.lines : {};
-    const v = (arr, i) => (arr && arr[i] != null ? arr[i] : 0);
-    const fcVal = (k, i) => {
-      if (!result || result[k === "sales" ? "sales" : k] === undefined && k !== "ni") return null;
-      if (k === "ni") return result.ebit[i] == null ? null : result.ebit[i] - v(L.fin, i) - v(L.tax, i);
-      return result[k][i];
-    };
+    const fcVal = (k, i) => k === "ni" ? (result.ebit[i] == null ? null : result.ebit[i] - v0(L.fin, i) - v0(L.tax, i)) : result[k][i];
     const bars = [];
     if (A) {
       const vals = A.get(M.a), sales = A.get("net sales"), eps = A.get("eps, diluted"), iac = A.get("items affecting comparability");
@@ -65,96 +78,131 @@
       });
     }
     if (data && result) {
-      // current year: reported quarters (actuals file) + your forecast quarters (model)
       if (qIdx.length) {
         let act = 0, actSales = 0, actEps = 0, haveAct = true, fc = 0, fcSales = 0, fcNi = 0, anyFc = false, oneoff = false;
+        const hasRep = qIdx.some(i => P[i].status.toLowerCase() === "reported");
         qIdx.forEach(i => {
           if (P[i].status.toLowerCase() === "reported") {
-            const lab = P[i].label;
-            const x = Q ? Q.value(M.q, lab) : null, sl = Q ? Q.value("net sales", lab) : null, ep = Q ? Q.value("eps, diluted", lab) : null;
-            const ia = Q ? Q.value("items affecting comparability", lab) : null;
-            if (x == null) haveAct = false; else { act += x; actSales += sl || 0; actEps += ep || 0; }
-            if ((ia || 0) > 0) oneoff = true;
-          } else {
-            anyFc = true; fc += fcVal(key, i) || 0; fcSales += result.sales[i] || 0; fcNi += fcVal("ni", i) || 0;
-          }
+            const lab = P[i].label, x = Q ? Q.value(M.q, lab) : null;
+            if (x == null) haveAct = false;
+            else { act += x; actSales += Q.value("net sales", lab) || 0; actEps += Q.value("eps, diluted", lab) || 0; }
+            if ((Q && Q.value("items affecting comparability", lab) || 0) > 0) oneoff = true;
+          } else { anyFc = true; fc += fcVal(key, i) || 0; fcSales += result.sales[i] || 0; fcNi += fcVal("ni", i) || 0; }
         });
-        const hasRep = qIdx.some(i => P[i].status.toLowerCase() === "reported");
-        bars.push({ label: curYear, actual: hasRep && haveAct ? act : null, forecast: anyFc ? fc : null, split: hasRep && anyFc,
-                    sales: (hasRep && haveAct ? actSales : 0) + fcSales, eps: (hasRep && haveAct ? actEps : 0) + fcNi / data.inputs.shares,
-                    oneoff, partialMissing: hasRep && !haveAct });
+        const okA = hasRep && haveAct;
+        bars.push({ label: curYear, actual: okA ? act : null, forecast: anyFc ? fc : null, split: okA && anyFc,
+                    sales: (okA ? actSales : 0) + fcSales, eps: (okA ? actEps : 0) + fcNi / data.inputs.shares, oneoff });
       }
       P.forEach((p, i) => {
         if (p.kind !== "FY" || p.status.toLowerCase() !== "forecast") return;
-        bars.push({ label: p.label.replace(/^FY /, ""), actual: null, forecast: fcVal(key, i), sales: result.sales[i],
-                    eps: fcVal("ni", i) / data.inputs.shares });
+        bars.push({ label: p.label.replace(/^FY /, ""), actual: null, forecast: fcVal(key, i), sales: result.sales[i], eps: fcVal("ni", i) / data.inputs.shares });
       });
     }
+    return bars;
+  }
+
+  /* ROIC: history from the actuals file; forecast capital rolled forward from the last year-end */
+  function roicSeries(ctx) {
+    const { data, result, actuals } = ctx, A = actuals && actuals.annual, Q = actuals && actuals.quarterly;
+    const bars = [];
+    if (!A) return bars;
+    const roic = A.get("roic incl. goodwill"), eq = A.get("equity"), nd = A.get("net debt"), le = A.get("lease liabilities"), lp = A.get("lease payments");
+    const P = data ? data.periods : [], L = data ? data.lines : {};
+    const qIdx = P.map((p, i) => i).filter(i => P[i].kind === "Q");
+    const curYear = qIdx.length ? P[qIdx[0]].label.slice(3) : null;
+    let base = null, baseYear = null, leaseDep = 0;
+    A.periods.forEach((y, i) => {
+      if (+y < 2021 || (curYear && +y >= +curYear)) return;
+      if (roic[i] != null) bars.push({ label: y, actual: roic[i], forecast: null });
+      if (eq[i] != null && nd[i] != null && le[i] != null) { base = eq[i] + nd[i] + le[i]; baseYear = y; }
+      if (lp[i] != null) leaseDep = lp[i];
+    });
+    if (!(data && result) || base == null) return bars;
+    let ic = base, nopat = 0, actPart = 0, hasAct = false, anyFc = false;
+    // current year: reported quarters from the actuals file, then your forecast quarters
+    let nwcPrev = A.value("working capital", baseYear);
+    qIdx.forEach(i => {
+      const lab = P[i].label;
+      if (P[i].status.toLowerCase() === "reported" && Q) {
+        const ebit = Q.value("ebit", lab), tax = Q.value("income tax", lab), pbt = Q.value("profit before tax", lab);
+        const capex = Q.value("capex", lab), dep = Q.value("depreciation", lab), am = Q.value("amortisation", lab), nwc = Q.value("working capital", lab);
+        if (ebit != null) { const n = ebit * (1 - taxRate(tax || 0, pbt || 0)); nopat += n; actPart += n; hasAct = true; }
+        ic += (capex || 0) - (dep || 0) + leaseDep / 4 - (am || 0) + (nwc != null && nwcPrev != null ? nwc - nwcPrev : 0);
+        if (nwc != null) nwcPrev = nwc;
+      } else {
+        anyFc = true;
+        nopat += result.ebit[i] * (1 - Math.min(0.4, Math.max(0, result.taxRate[i] || 0)));
+        ic += v0(L.capex, i) - v0(L.dep, i) + leaseDep / 4 - v0(L.amort, i) + v0(L.nwc, i);
+      }
+    });
+    if (qIdx.length) bars.push({ label: curYear, actual: null, forecast: nopat / ic, split: false, mixed: hasAct && anyFc });
+    P.forEach((p, i) => {
+      if (p.kind !== "FY" || p.status.toLowerCase() !== "forecast") return;
+      ic += v0(L.capex, i) - v0(L.dep, i) + leaseDep - v0(L.amort, i) + v0(L.nwc, i);
+      bars.push({ label: p.label.replace(/^FY /, ""), actual: null, forecast: result.ebit[i] * (1 - Math.min(0.4, Math.max(0, result.taxRate[i] || 0))) / ic });
+    });
     return bars;
   }
 
   function cagr(a, b, n) { return a > 0 && b > 0 && n > 0 ? Math.pow(b / a, 1 / n) - 1 : null; }
 
   function keyChart(bars, key, h) {
-    const M = METRICS[key];
-    const W = 780, H = 370, l = 46, r = 14, t = M.arrows ? 88 : 64, b = 42, cw = W - l - r, ch = H - t - b;
+    const M = METRICS[key], pctMode = !!M.pct;
+    const l = 14, r = 14, t = M.arrows ? 92 : M.bubble ? 74 : 50, b = 34, cw = W - l - r, ch = H - t - b;
     const tot = bars.map(x => (x.actual || 0) + (x.forecast || 0));
-    let hi = Math.max(0, ...tot), lo = Math.min(0, ...tot);
-    const st = niceStep(Math.max(hi - lo, 1) / 4);
-    hi = Math.ceil(hi / st) * st || st; lo = Math.floor(lo / st) * st;
+    const hi = Math.max(0, ...tot) * 1.08 || 1, lo = Math.min(0, ...tot) * 1.15;
     const y = v => t + (hi - v) / (hi - lo) * ch, bw = cw / bars.length, xc = i => l + bw * (i + 0.5);
-    let g = `<defs><marker id="mm-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>`;
-    for (let v = lo; v <= hi + 1e-9; v += st) {
-      g += `<line x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" ${v === 0 ? 'stroke-width="1.4"' : ""}/>` +
-           `<text x="${l - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${k(v)}</text>`;
-    }
-    // actual | forecast divider
+    const fmtV = v => pctMode ? (v * 100).toFixed(1) + "%" : h.fmt(v, 0);
     const firstFc = bars.findIndex(x => x.forecast != null);
+    let g = "";
+    // light grey background behind the actual years
     if (firstFc > 0) {
-      const xd = l + bw * firstFc;
-      g += `<line x1="${xd}" x2="${xd}" y1="${t - (M.arrows ? 70 : 46)}" y2="${H - b + 6}" stroke="var(--muted)" stroke-dasharray="3 4" opacity=".6"/>` +
-           `<text x="${xd - 10}" y="${t - (M.arrows ? 74 : 50)}" text-anchor="end" font-size="11" font-weight="600" fill="var(--muted)" letter-spacing=".06em">ACTUAL</text>` +
-           `<text x="${xd + 10}" y="${t - (M.arrows ? 74 : 50)}" font-size="11" font-weight="600" fill="${NAVY}" letter-spacing=".06em">YOUR FORECAST</text>`;
+      g += `<rect x="${l}" y="0" width="${bw * firstFc}" height="${H - b + 4}" fill="${ACT_BG}" rx="6"/>`;
+      g += label(l + 12, 18, "ACTUAL", { anchor: "start", size: 11, weight: 600, fill: "var(--muted)", ls: ".06em" });
+      g += label(l + bw * firstFc + 12, 18, "YOUR FORECAST", { anchor: "start", size: 11, weight: 600, fill: NAVY, ls: ".06em" });
+    } else if (firstFc === 0) {
+      g += label(l + 12, 18, "YOUR FORECAST", { anchor: "start", size: 11, weight: 600, fill: NAVY, ls: ".06em" });
     }
+    g += `<line x1="${l}" x2="${W - r}" y1="${y(0)}" y2="${y(0)}" stroke="#C9CED6"/>`;
     bars.forEach((x, i) => {
-      const a = x.actual || 0, f = x.forecast || 0, total = a + f, w = bw * 0.6, x0 = xc(i) - w / 2;
+      const a = x.actual || 0, f = x.forecast || 0, total = a + f, w = bw * 0.58, x0 = xc(i) - w / 2;
       if (x.split && a >= 0 && f >= 0) {
-        g += `<rect x="${x0}" y="${y(a)}" width="${w}" height="${Math.max(0, y(0) - y(a))}" fill="${NAVY}"><title>${x.label} reported: ${h.fmt(a, 0)}</title></rect>`;
-        g += `<rect x="${x0}" y="${y(total)}" width="${w}" height="${Math.max(0, y(a) - y(total))}" fill="${LIGHT}"><title>${x.label} your forecast: ${h.fmt(f, 0)}</title></rect>`;
+        g += `<rect x="${x0}" y="${y(a)}" width="${w}" height="${Math.max(0, y(0) - y(a))}" fill="${NAVY}"><title>${x.label} reported: ${fmtV(a)}</title></rect>`;
+        g += `<rect x="${x0}" y="${y(total)}" width="${w}" height="${Math.max(0, y(a) - y(total))}" fill="${LIGHT}"><title>${x.label} your forecast: ${fmtV(f)}</title></rect>`;
       } else {
         const top = y(Math.max(0, total)), bot = y(Math.min(0, total));
-        g += `<rect x="${x0}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${x.actual != null && x.forecast == null ? NAVY : LIGHT}"><title>${x.label}: ${h.fmt(total, 0)}</title></rect>`;
+        g += `<rect x="${x0}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${x.actual != null && x.forecast == null ? NAVY : LIGHT}"><title>${x.label}: ${fmtV(total)}</title></rect>`;
       }
-      const ly = total >= 0 ? y(total) - 7 : y(total) + 15;
-      g += `<text x="${xc(i)}" y="${ly}" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">${h.fmt(total, 0)}${M.oneoff && x.oneoff ? "*" : ""}</text>`;
+      g += label(xc(i), total >= 0 ? y(total) - 7 : y(total) + 16, fmtV(total) + (M.oneoff && x.oneoff ? "*" : ""));
       if (M.bubble) {
         const val = M.bubble === "margin" ? (x.sales ? total / x.sales : null) : x.eps;
         if (val != null && isFinite(val)) {
-          const txt = M.bubble === "margin" ? (val * 100).toFixed(1) + "%" : val.toFixed(2);
-          const by = Math.min(total >= 0 ? y(total) - 32 : y(0) - 26, t - 6), bwid = txt.length * 6.6 + 14;
-          g += `<rect x="${xc(i) - bwid / 2}" y="${by - 13}" width="${bwid}" height="19" rx="9.5" fill="${x.forecast != null ? "#EDF4FC" : "#E6EAF2"}"/>` +
-               `<text x="${xc(i)}" y="${by + 1}" text-anchor="middle" font-size="10.5" font-weight="600" fill="${NAVY}">${txt}</text>`;
+          const txt = M.bubble === "margin" ? (val * 100).toFixed(1) + "%" : val.toFixed(2), bwid = txt.length * 7 + 16, by = t - 30;
+          const isAct = x.actual != null && x.forecast == null;
+          g += `<rect x="${xc(i) - bwid / 2}" y="${by - 13}" width="${bwid}" height="20" rx="10" fill="${isAct ? NAVY : LIGHT}"/>` +
+               label(xc(i), by + 2, txt, { size: 11, weight: 500, fill: isAct ? "#fff" : NAVY });
         }
       }
-      g += `<text x="${xc(i)}" y="${H - b + 20}" text-anchor="middle" font-size="11.5" fill="var(--muted)">${x.label}</text>`;
+      g += label(xc(i), H - b + 20, x.label, { fill: "var(--muted)" });
     });
-    // CAGR arrows (revenue and free cash flow)
+    // CAGR arrows: thin, separated, line broken around the label
     const notes = [];
     if (M.arrows) {
       const lastA = firstFc > 0 ? firstFc - 1 : bars.length - 1, lastF = bars.length - 1;
-      const seg = (i0, i1, color) => {
+      const seg = (i0, i1, color, gapStart, gapEnd) => {
         if (i1 <= i0) return;
-        const n = +bars[i1].label - +bars[i0].label, a = tot[i0], z = tot[i1], c = cagr(a, z, n);
+        const n = +bars[i1].label - +bars[i0].label, c = cagr(tot[i0], tot[i1], n);
         const txt = c != null ? `CAGR ${c >= 0 ? "+" : ""}${(c * 100).toFixed(1)}%` : `Average ${h.fmt(tot.slice(i0, i1 + 1).reduce((s, q) => s + q, 0) / (i1 - i0 + 1), 0)} a year`;
-        if (c == null) notes.push(`${bars[i0].label}–${bars[i1].label}: growth rate not meaningful (negative value), average shown`);
-        const ay = t - 34, x1 = xc(i0), x2 = xc(i1), xm = (x1 + x2) / 2, tw = txt.length * 7.4 + 22;
-        g += `<line x1="${x1}" x2="${x2}" y1="${ay}" y2="${ay}" stroke="${color}" stroke-width="1.6" marker-end="url(#mm-arr)"/>` +
-             `<line x1="${x1}" x2="${x1}" y1="${ay - 5}" y2="${ay + 5}" stroke="${color}" stroke-width="1.6"/>` +
-             `<rect x="${xm - tw / 2}" y="${ay - 11}" width="${tw}" height="22" rx="11" fill="var(--surface)" stroke="${color}"/>` +
-             `<text x="${xm}" y="${ay + 4}" text-anchor="middle" font-size="11.5" font-weight="600" fill="${color}">${txt}</text>`;
+        if (c == null) notes.push(`${bars[i0].label}–${bars[i1].label}: growth rate not meaningful because of a negative year, average shown`);
+        const ay = t - 46, x1 = xc(i0) + gapStart, x2 = xc(i1) - gapEnd, xm = (x1 + x2) / 2, tw = txt.length * 7 + 20;
+        g += `<line x1="${x1}" x2="${xm - tw / 2 - 6}" y1="${ay}" y2="${ay}" stroke="${color}" stroke-width="1"/>` +
+             `<line x1="${xm + tw / 2 + 6}" x2="${x2}" y1="${ay}" y2="${ay}" stroke="${color}" stroke-width="1"/>` +
+             `<path d="M${x2 - 6},${ay - 3.5} L${x2},${ay} L${x2 - 6},${ay + 3.5}" fill="none" stroke="${color}" stroke-width="1"/>` +
+             `<rect x="${xm - tw / 2}" y="${ay - 11}" width="${tw}" height="22" rx="11" fill="var(--surface)" stroke="${color}" stroke-width="1"/>` +
+             label(xm, ay + 4, txt, { size: 11.5, weight: 500, fill: color });
       };
-      seg(0, lastA, "var(--ink)");
-      if (firstFc > 0) seg(lastA, lastF, NAVY);
+      seg(0, lastA, "var(--ink)", 0, 10);
+      if (firstFc > 0) seg(lastA, lastF, NAVY, 10, 0);
     }
     return { svg: `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="${h.esc(M.name)}, actual and forecast">${g}</svg>`, notes };
   }
@@ -163,46 +211,20 @@
     const { data, result, actuals, h } = ctx, key = ctx.metric || "sales", M = METRICS[key];
     if (!actuals && !(data && result)) return "";
     const bars = seriesFor(key, ctx).filter(x => x.actual != null || x.forecast != null);
-    if (!bars.length) return "";
-    const { svg, notes } = keyChart(bars, key, h);
-    // action title (one message per chart)
-    const firstFc = bars.findIndex(x => x.forecast != null), lastA = firstFc > 0 ? firstFc - 1 : (firstFc < 0 ? bars.length - 1 : -1);
-    const tot = x => (x.actual || 0) + (x.forecast || 0), last = bars[bars.length - 1];
-    let title = M.name;
-    const pctS = c => (c >= 0 ? "+" : "") + (c * 100).toFixed(1) + "%";
-    if (M.arrows && lastA > 0) {
-      const ch = cagr(tot(bars[0]), tot(bars[lastA]), +bars[lastA].label - +bars[0].label);
-      const cf = firstFc > 0 ? cagr(tot(bars[lastA]), tot(last), +last.label - +bars[lastA].label) : null;
-      const avg = bars.slice(0, lastA + 1).reduce((s2, x) => s2 + tot(x), 0) / (lastA + 1);
-      title = `${M.name}${ch != null ? ` grew ${pctS(ch)} a year ${bars[0].label}–${bars[lastA].label.slice(-2)}` : ` averaged SEK ${h.fmt(avg, 0)}m a year ${bars[0].label}–${bars[lastA].label.slice(-2)}`}${cf != null ? `; your forecast: ${pctS(cf)} a year to ${last.label}` : ""}`;
-    } else if (M.bubble === "margin" && lastA >= 0) {
-      const m = x => x.sales ? (tot(x) / x.sales * 100).toFixed(1) + "%" : "–";
-      title = `${M.name} margin: ${m(bars[lastA])} in ${bars[lastA].label}${firstFc > 0 ? `, ${m(last)} in ${last.label} in your forecast` : ""}`;
-    } else if (M.bubble === "eps" && lastA >= 0) {
-      const e = x => x.eps != null ? x.eps.toFixed(2) : "–";
-      title = `Earnings per share: SEK ${e(bars[lastA])} in ${bars[lastA].label}${firstFc > 0 ? `, SEK ${e(last)} in ${last.label} in your forecast` : ""}`;
-    }
+    const tabs = Object.entries(METRICS).map(([k2, m]) => `<button data-action="metric" data-metric="${k2}" aria-pressed="${k2 === key}">${m.name}</button>`).join("");
     const split = bars.find(x => x.split);
     const legend = `<span><i style="background:${NAVY}"></i>Actual</span><span><i style="background:${LIGHT}"></i>Your forecast</span>` +
-      (split ? `<span><i class="split"></i>${split.label}: reported quarters + your forecast</span>` : "") +
-      (M.oneoff && bars.some(x => x.oneoff) ? `<span>* Includes one-offs (restructuring)</span>` : "") +
-      (M.bubble === "margin" ? `<span><i class="pill"></i>${M.name} margin</span>` : M.bubble === "eps" ? `<span><i class="pill"></i>EPS, SEK</span>` : "");
-    const defs = {
-      sales: "Net sales, SEK m.",
-      ebitda: "SEK m. Actual years: adjusted EBITDA (excl. one-offs). Forecast: EBITDA from your model.",
-      ebit: "SEK m. Actual years as reported, including one-offs.",
-      ni: "SEK m. Forecast net income = EBIT − financial costs − tax from your model; EPS on today's share count.",
-      fcf: "SEK m. Actual years on Mr. Market's definition (same as your forecast); reported quarters: operating cash flow − capex."
-    };
-    const tabs = Object.entries(METRICS).map(([k2, m]) => `<button data-action="metric" data-metric="${k2}" aria-pressed="${k2 === key}">${m.name}</button>`).join("");
-    const dl = ctx.hasActuals ? `<button class="link-btn" data-action="download-actuals"><svg class="ic"><use href="#i-down"/></svg>Download historical data (Excel)</button>` : "";
+      (split ? `<span><i class="split"></i>${split.label}: reported + your forecast</span>` : "");
+    let body, notes = [];
+    if (bars.length) { const kc = keyChart(bars, key, h); body = `<div class="kc-scroll">${kc.svg}</div>`; notes = kc.notes; }
+    else body = `<p class="dim kc-empty">${key === "roic" ? "ROIC needs historical balance sheet data for this company" : "No data to show yet"}</p>`;
+    const foot = [...NOTES[key], ...(M.oneoff && bars.some(x => x.oneoff) ? ["* Includes one-offs (restructuring)"] : []), ...notes,
+                  ...(actuals ? [] : ["No historical data yet for this company"])];
     return `<section class="card cp-chart kc">
-      <div class="kc-head"><div><h2>${h.esc(title)}</h2><p class="sub">${defs[key]}${actuals ? "" : " No historical data yet for this company."}</p></div>
-      <div class="seg kc-tabs" role="group" aria-label="Choose metric">${tabs}</div></div>
-      <div class="kc-scroll">${svg}</div>
-      <div class="legend">${legend}</div>
-      ${notes.length ? `<p class="note small">${notes.map(h.esc).join(". ")}.</p>` : ""}
-      ${dl ? `<div class="kc-foot">${dl}</div>` : ""}
+      <div class="kc-title"><h2>Actual vs forecast</h2><span class="unit">${M.pct ? "%" : "SEK m"}</span></div>
+      <div class="kc-bar"><div class="seg kc-tabs" role="group" aria-label="Choose metric">${tabs}</div><div class="legend kc-legend">${legend}</div></div>
+      ${body}
+      <ul class="kc-notes">${foot.map(n => `<li>${h.esc(n)}</li>`).join("")}</ul>
     </section>`;
   }
 
@@ -222,20 +244,21 @@
     </div>`;
 
     // ---- model card
+    const histBtn = ctx.hasActuals ? `<button class="pill" data-action="download-actuals"><svg><use href="#i-down"/></svg>Download historical data</button>` : "";
     const tplBtn = hasTemplate
       ? `<button class="pill" data-action="download-template"><svg><use href="#i-down"/></svg>Download transfer sheet</button>`
-      : `<span class="dim small">No transfer sheet developed yet for this company.</span>`;
+      : `<span class="dim small">No transfer sheet developed yet for this company</span>`;
     html += `<section class="card cp-model"><div class="cp-model-head"><h2>Your model</h2></div>`;
     if (latest) {
       html += `<p class="cp-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${h.esc(latest.fileName)}</b><br><span class="dim small">Uploaded ${h.fmtDate(latest.uploadedAt.slice(0, 10))} · based on ${h.esc(latest.basis)} · template ${h.esc(latest.templateVersion || "–")}</span></span></p>
       <div class="cp-actions"><button class="pill primary" data-action="upload"><svg><use href="#i-up"/></svg>Upload new version</button>
-      <button class="pill" data-action="download-model"><svg><use href="#i-down"/></svg>Download my model</button>${tplBtn}</div>`;
+      <button class="pill" data-action="download-model"><svg><use href="#i-down"/></svg>Download my model</button>${tplBtn}${histBtn}</div>`;
     } else {
       html += `<ol class="steps">
         <li><b>Download the transfer sheet</b> for ${h.esc(s.name)}. ${hasTemplate ? "" : "<span class='dim'>(not available yet)</span>"}</li>
         <li><b>Copy it into your DCF</b> in Excel, link the orange cells and save.</li>
         <li><b>Upload your model</b>. Mr. Market checks it and shows your value per share.</li></ol>
-      <div class="cp-actions"><button class="pill primary" data-action="upload"><svg><use href="#i-up"/></svg>Upload model</button>${tplBtn}</div>`;
+      <div class="cp-actions"><button class="pill primary" data-action="upload"><svg><use href="#i-up"/></svg>Upload model</button>${tplBtn}${histBtn}</div>`;
     }
     if (!connected) html += `<p class="note">Connect GitHub under Settings to store models and transfer sheets.</p>`;
     html += `</section>`;
@@ -258,7 +281,8 @@
         { label: "Earn-outs\n& options", value: -result.other },
         { label: "Equity\nvalue", value: result.equity, total: true }
       ];
-      html += `<section class="card cp-chart"><h2>From cash flows to value</h2><p class="sub">Present values, SEK m. ${h.fmt(result.equity, 0)} / ${h.fmt(data.inputs.shares)} m shares = <b>SEK ${h.fmt(result.vps)}</b> per share.</p>${waterfall(steps, h)}</section>`;
+      html += `<section class="card cp-chart kc"><div class="kc-title"><h2>From cash flows to value</h2><span class="unit">SEK m</span></div>${waterfall(steps, h)}
+        <ul class="kc-notes"><li>Present values at your WACC of ${(data.inputs.wacc * 100).toFixed(1)}%</li><li>Equity value ${h.fmt(result.equity, 0)} / ${h.fmt(data.inputs.shares)} m shares = SEK ${h.fmt(result.vps)} per share</li></ul></section>`;
 
       // key assumptions table
       const cols = P.map((p, i) => i).filter(i => fc[i]);

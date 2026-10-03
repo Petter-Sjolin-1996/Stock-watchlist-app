@@ -171,3 +171,73 @@ tbody tr:hover td.sticky{background:var(--hover)}
 .pill.refresh.busy svg{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.pill.refresh.busy svg{animation:none}}
+
+/* ---------- company page ---------- */
+[hidden]{display:none !important}
+.cp{display:flex;flex-direction:column;gap:16px}
+.back{color:var(--blue);text-decoration:none;font-weight:500;align-self:flex-start;padding:4px 0}
+.back:hover{text-decoration:underline}
+.cp-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.cp-title{display:flex;align-items:center;gap:14px}
+.cp-title .flag{width:30px;height:30px}
+.cp-title h1{font-size:30px;line-height:1.15}
+.cp-title small{color:var(--muted);font-size:14px}
+.cp-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;display:flex;flex-direction:column;gap:2px}
+.stat small{color:var(--muted);font-size:13px}
+.stat b{font-size:26px;font-weight:600;letter-spacing:-.01em}
+.stat b.stat-text{font-size:18px;padding:6px 0 4px}
+.stat span{font-size:13px}
+.stat-up{border-color:var(--up);background:var(--up-soft)}
+.stat-up b{color:var(--up)}
+.stat-down{border-color:var(--down);background:var(--down-soft)}
+.stat-down b{color:var(--down)}
+.cp-model,.cp-chart{padding:20px 24px}
+.cp-model h2,.cp-chart h2{font-size:20px;margin-bottom:4px}
+.cp-file,.rv-file{display:flex;gap:12px;align-items:center;margin:12px 0 16px}
+.xl{width:30px;height:30px;flex:none}
+.small{font-size:13px}
+.cp-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.steps{margin:12px 0 18px;padding-left:22px;display:flex;flex-direction:column;gap:6px}
+.cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.chart-svg{width:100%;height:auto;display:block;margin-top:8px}
+.cp-chart .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin-top:8px}
+.cp-chart .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.cp-chart .legend i.ln{height:3px;width:16px;border-radius:2px;background:var(--ink);vertical-align:3px}
+.tbl-scroll{overflow-x:auto;margin-top:10px}
+table.assump,table.versions{width:100%;border-collapse:collapse;font-size:14px}
+table.assump th,table.assump td,table.versions th,table.versions td{padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.assump thead th,table.versions thead th{font-weight:500;color:var(--muted);font-size:13px;text-align:right}
+table.assump thead th:first-child,table.versions thead th{text-align:left}
+table.assump tbody th{text-align:left;font-weight:400}
+table.assump td{text-align:right}
+table.assump tr.strong th,table.assump tr.strong td{font-weight:600}
+table.versions td.file{color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.link-btn{border:0;background:none;color:var(--blue);font-weight:500;padding:4px 6px}
+.link-btn:hover{text-decoration:underline}
+.pill:disabled{opacity:.5;cursor:default}
+
+/* ---------- review dialog ---------- */
+.dialog.wide{width:min(620px,calc(100% - 24px))}
+.rv-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:4px 0 14px}
+.rv-stats div{background:var(--bg);border-radius:10px;padding:10px 12px}
+.rv-stats small{display:block;color:var(--muted);font-size:12.5px}
+.rv-stats b{font-size:19px;font-weight:600}
+.checks{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-direction:column;gap:6px}
+.checks li{padding:8px 12px 8px 34px;border-radius:10px;position:relative;font-size:14px}
+.checks li::before{position:absolute;left:12px;top:8px;font-weight:700}
+.checks li.good{background:var(--up-soft)} .checks li.good::before{content:"✓";color:var(--up)}
+.checks li.warn-i{background:var(--amber-soft)} .checks li.warn-i::before{content:"!";color:var(--amber)}
+.checks li.bad{background:var(--down-soft)} .checks li.bad::before{content:"✕";color:var(--down)}
+
+@media (max-width:820px){
+  .cp-stats{grid-template-columns:1fr 1fr}
+  .cp-grid{grid-template-columns:1fr}
+  .rv-stats{grid-template-columns:1fr 1fr}
+}
+
+.cp table th,.cp table td{padding:9px 10px}
+.cp table.versions th,.cp table.versions td{text-align:left}
+.cp table.versions td:nth-child(3),.cp table.versions th:nth-child(3){text-align:right}
+.cp tbody tr{cursor:default}
+.cp tbody tr:hover{background:transparent}

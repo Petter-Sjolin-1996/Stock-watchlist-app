@@ -249,13 +249,13 @@
       { label: "Earn-outs\n& options", value: -res.other },
       { label: "Equity\nvalue", value: res.equity, total: true }
     ];
-    const price = s.price, up = price ? res.vps / price - 1 : null;
+    const price = s.price, up0 = price ? res.vps / price - 1 : null, up = up0 != null && Math.abs(up0) < 0.0005 ? 0 : up0;
     const calc = `
       <div class="vp-row"><span>Equity value</span><b>${h.fmt(res.equity, 0)}</b></div>
       <div class="vp-row"><span>÷ Shares outstanding, m</span><b>${h.fmt(data.inputs.shares)}</b></div>
       <div class="vp-row vp-total"><span>Value per share</span><b>SEK ${h.fmt(res.vps)}</b></div>
       <div class="vp-row"><span>Share price${s.priceDate ? `<small>as of ${h.fmtDate(s.priceDate)}</small>` : ""}</span><b>${price != null ? "SEK " + h.fmt(price) : "–"}</b></div>
-      <div class="vp-row vp-up"><span>${up == null ? "Upside" : up >= 0 ? "Upside" : "Downside"}</span><b class="${up == null ? "" : up >= 0 ? "pos" : "neg"}">${up == null ? "–" : h.pct(up)}</b></div>`;
+      <div class="vp-row vp-up"><span>${up == null || up >= 0 ? "Upside" : "Downside"}</span><b class="${up == null || up === 0 ? "" : up > 0 ? "pos" : "neg"}">${up == null ? "–" : h.pct(up)}</b></div>`;
     return { chart: waterfall(steps, h, 560), calc, note: `Present values at a WACC of ${(wacc * 100).toFixed(1)}%`, res };
   }
   function valuationCard(ctx) {
@@ -271,12 +271,25 @@
             <input type="range" id="wacc-slider" min="${rg.min}" max="${rg.max}" step="0.1" value="${(wacc * 100).toFixed(1)}" aria-label="WACC">
             <div class="vp-scale"><span>${rg.min}%</span><span>${rg.max}%</span></div>
             <div class="vp-reset"><span class="dim small">Your model: ${(base * 100).toFixed(1)}%</span>
-              <button class="link-btn" data-action="wacc-reset" ${Math.abs(wacc - base) < 1e-9 ? "disabled" : ""}>Reset</button></div>
-            <p class="dim small vp-hint">What-if only. Your model is not changed</p>
+              <span><button class="link-btn" data-action="wacc-implied" ${ctx.s.price ? "" : "disabled"}>Implied return</button><button class="link-btn" data-action="wacc-reset" ${Math.abs(wacc - base) < 1e-9 ? "disabled" : ""}>Reset</button></span></div>
+            <p class="dim small vp-hint" id="wacc-hint">${(() => { const imp = ctx.wacc != null && ctx.s.price ? impliedWacc(ctx) : null;
+              return imp && imp.wacc && Math.abs(imp.wacc - wacc) < 1e-6 ? `Implied return at today's price: ${(wacc * 100).toFixed(1)}% a year` : "What-if only. Your model is not changed"; })()}</p>
           </div>
         </aside>
       </div></section>`;
   }
+  // market-implied WACC: the WACC at which your value per share equals today's share price (bisection)
+  function impliedWacc(ctx) {
+    const { data, s } = ctx, price = s.price, rg = waccRange(data);
+    if (!price) return { error: "No share price available" };
+    const vps = w => MMModels.computeValuation(withWacc(data, w)).vps;
+    let lo = rg.min / 100, hi = rg.max / 100;
+    if (vps(lo) < price) return { error: `Your forecast cannot reach today's price even at a WACC of ${rg.min}%` };
+    if (vps(hi) > price) return { error: `Today's price implies a WACC above ${rg.max}%` };
+    for (let k = 0; k < 60; k++) { const mid = (lo + hi) / 2; if (vps(mid) > price) lo = mid; else hi = mid; }
+    return { wacc: (lo + hi) / 2 };
+  }
+
   // fast update while dragging the slider: only the chart and the numbers are redrawn
   function updateValuation(root, ctx, wacc) {
     const card = root.querySelector("#valuation-card");
@@ -288,6 +301,9 @@
     card.querySelector("#wacc-val").textContent = (wacc * 100).toFixed(1) + "%";
     const sl = card.querySelector("#wacc-slider"); if (Math.abs(+sl.value / 100 - wacc) > 1e-9) sl.value = (wacc * 100).toFixed(1);
     card.querySelector('[data-action="wacc-reset"]').disabled = Math.abs(wacc - base) < 1e-9;
+    const imp = ctx.s.price ? impliedWacc(ctx) : null;
+    card.querySelector("#wacc-hint").textContent = imp && imp.wacc && Math.abs(imp.wacc - wacc) < 1e-6
+      ? `Implied return at today's price: ${(wacc * 100).toFixed(1)}% a year` : "What-if only. Your model is not changed";
   }
 
   function render(el, ctx) {
@@ -373,5 +389,5 @@
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { render, updateValuation };
+  window.MMCompany = { render, updateValuation, impliedWacc };
 })();

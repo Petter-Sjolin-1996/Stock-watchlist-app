@@ -276,5 +276,41 @@
     return out;
   }
 
-  window.MMModels = { readWorkbook, parseTransferSheet, computeValuation };
+  /* ---------- 5. historical data file (actuals/<TICKER>_actuals.xlsx) ---------- */
+  // Returns {annual:{periods:[...], get(label)}, quarterly:{...}} with lines found by their label in column B.
+  async function readActuals(buf) {
+    const wb = await readWorkbook(buf);
+    const out = {};
+    for (const name of ["Annual", "Quarterly"]) {
+      const ws = await wb.sheet(name);
+      if (!ws) continue;
+      let hdr = 0;
+      for (let r = 1; r <= Math.min(ws.maxRow, 10); r++) if (norm(ws.cell("B", r).v) === "line item") { hdr = r; break; }
+      if (!hdr) continue;
+      const periods = [];
+      for (let c = 4; c < 60; c++) {
+        const v = ws.cell(c, hdr).v;
+        if (v == null || v === "" || /source|note/i.test(String(v))) break;
+        periods.push(String(v).trim());
+      }
+      const rows = {};
+      for (let r = hdr + 1; r <= ws.maxRow; r++) {
+        const lab = norm(ws.cell("B", r).v);
+        if (!lab || rows[lab]) continue;
+        rows[lab] = periods.map((_, i) => num(ws.cell(4 + i, r).v));
+      }
+      out[name.toLowerCase()] = {
+        periods,
+        get(label) {
+          const n = norm(label), keys = Object.keys(rows);
+          const k = keys.find(x => x === n) || keys.find(x => x.startsWith(n));
+          return k ? rows[k] : periods.map(() => null);
+        },
+        value(label, period) { const i = periods.indexOf(period); return i < 0 ? null : this.get(label)[i]; }
+      };
+    }
+    return out;
+  }
+
+  window.MMModels = { readWorkbook, parseTransferSheet, computeValuation, readActuals };
 })();

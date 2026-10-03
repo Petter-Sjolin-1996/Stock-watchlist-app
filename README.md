@@ -24,3 +24,7 @@ Actuals annual). The app reads rows by their labels, not by cell addresses.
 - v0.6: real end-of-day prices, key figures, history and report dates from Yahoo Finance via a nightly GitHub Actions job in the private data repo; Settings dialog for the GitHub connection.
 - v0.7: 'as of' date under each last price (or 'demo price' when not connected).
 - v0.8: Refresh prices button that starts the data workflow from the app and reloads when done (token needs Actions: Read and write).
+- v0.9: automatic update check via version.json, so new releases load without private browsing.
+
+## Releasing a new version
+Bump the number in four places: `version.json`, `APP_VERSION` in `app.js`, and the two `?v=` tags in `index.html`.

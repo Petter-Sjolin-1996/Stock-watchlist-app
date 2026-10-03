@@ -333,7 +333,8 @@ $("gh-remove").onclick=()=>{gh.token="";try{localStorage.setItem(GH_KEY,JSON.str
 /* ---------- models in the data repo ----------
    models/index.json lists every upload (newest first); each upload has the original .xlsx and a .json
    with what Mr. Market read. Blank transfer sheets live in templates/<TICKER>_transfer_sheet.xlsx */
-let MODEL_INDEX=[], TEMPLATES=new Set(); const MODEL_DATA={};
+let MODEL_INDEX=[], TEMPLATES=new Set(); const MODEL_DATA={}, ACTUALS={};
+let chartMetric="sales";
 const safeT=t=>t.replace(/\s+/g,"-");
 const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
 function latestModel(t){return MODEL_INDEX.find(m=>m.ticker===t)||null}
@@ -386,6 +387,17 @@ function showCompany(t){
   renderCompany();
 }
 const LOADING=new Set();
+const actualsPath=t=>`actuals/${safeT(t)}_actuals.xlsx`;
+async function ensureActuals(t){
+  if(ACTUALS[t]!==undefined||LOADING.has("A:"+t)||!gh.token) return;
+  LOADING.add("A:"+t);
+  try{
+    const r=await ghApi("/contents/"+encPath(actualsPath(t)),{headers:{Accept:"application/vnd.github.raw+json"}});
+    ACTUALS[t]=r.ok?await MMModels.readActuals(await r.arrayBuffer()):null;
+  }catch(e){ACTUALS[t]=null}
+  finally{LOADING.delete("A:"+t)}
+  if(currentCompany===t) renderCompany();
+}
 async function ensureModelData(t,path){
   if(MODEL_DATA[path]||LOADING.has(path)||!gh.token) return;
   LOADING.add(path);
@@ -396,9 +408,11 @@ function renderCompany(){
   if(!currentCompany) return;
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
   if(lm&&!data) ensureModelData(t,lm.json);
+  ensureActuals(t);
   let result=null; try{result=data?MMModels.computeValuation(data):null}catch(e){}
   MMCompany.render($("view-company"),{s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
-    versions:MODEL_INDEX.filter(m=>m.ticker===t),latest:lm,data,result,h:{fmt,pct,esc,fmtDate,flag,daysTo}});
+    versions:MODEL_INDEX.filter(m=>m.ticker===t),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
+    h:{fmt,pct,esc,fmtDate,flag,daysTo}});
 }
 window.addEventListener("hashchange",route);
 
@@ -412,6 +426,8 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="download-template"){toast("Downloading…");await downloadPath(`templates/${safeT(t)}_transfer_sheet.xlsx`,`${safeT(t)}_transfer_sheet.xlsx`)}
     else if(a==="download-model"){const lm=latestModel(t);toast("Downloading…");await downloadPath(lm.xlsx,lm.fileName)}
     else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
+    else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_data.xlsx`)}
+    else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
   }catch(err){toast(err.message)}
 });
 $("model-file").addEventListener("change",async()=>{
@@ -470,7 +486,7 @@ async function saveModel(){
    version.json in the repo always holds the latest version. If it differs from the code that is
    running, the page reloads itself with ?v=<new version>, which makes Safari fetch fresh files.
    Runs in the background, so it never slows the app down. */
-const APP_VERSION="0.10";
+const APP_VERSION="0.11";
 let lastCheck=0;
 async function checkForUpdate(){
   if(Date.now()-lastCheck<60000) return; lastCheck=Date.now();

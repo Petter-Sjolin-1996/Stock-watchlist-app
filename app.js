@@ -8,18 +8,31 @@ const APP_VERSION="0.19";
   const cssV=getComputedStyle(document.documentElement).getPropertyValue("--mm-version").replace(/["'\s]/g,"");
   const parts=[["models.js",window.MMModels&&window.MMModels.VERSION],["company.js",window.MMCompany&&window.MMCompany.VERSION],["styles.css",cssV]];
   const off=parts.filter(([,v])=>v!==APP_VERSION);
+  let tries=0; const key="mm-guard-"+APP_VERSION;
+  try{tries=+(sessionStorage.getItem(key)||0)}catch(e){}
   if(off.length){
     console.warn("Mixed release",APP_VERSION,parts);
-    const bar=document.createElement("div"); bar.className="updating"; bar.textContent="Mr. Market is updating, reloading in a moment…";
-    document.body.prepend(bar);
-    const refresh=async()=>{
-      const files=["index.html","app.js","models.js","company.js","styles.css"];
-      await Promise.all(files.flatMap(f=>[fetch(f,{cache:"reload"}),fetch(`${f}?v=${APP_VERSION}`,{cache:"reload"})]).map(p=>p.catch(()=>null)));
-      location.reload();
-    };
-    setTimeout(refresh,15000);
+    const bar=document.createElement("div"); bar.className="updating"; document.body.prepend(bar);
+    if(tries<2){
+      // probably a deployment in progress: refresh the files and reload (at most twice)
+      try{sessionStorage.setItem(key,String(tries+1))}catch(e){}
+      bar.textContent="Mr. Market is updating, reloading in a moment…";
+      const refresh=async()=>{
+        const files=["index.html","app.js","models.js","company.js","styles.css"];
+        await Promise.all(files.flatMap(f=>[fetch(f,{cache:"reload"}),fetch(`${f}?v=${APP_VERSION}`,{cache:"reload"})]).map(p=>p.catch(()=>null)));
+        location.reload();
+      };
+      setTimeout(refresh,15000);
+    }else{
+      // still mixed after two reloads: the repo itself has files from different releases
+      bar.innerHTML=`<b>Some app files are from a different release.</b> Expected version ${APP_VERSION}, but `+
+        off.map(([n,v])=>`${n} is ${v?"version "+v:"an older version"}`).join(", ")+
+        `. Upload all files from release ${APP_VERSION} to the watchlist-app repo. <button id="guard-retry">Try again</button>`;
+      document.getElementById("guard-retry").onclick=()=>{try{sessionStorage.removeItem(key)}catch(e){};location.reload()};
+    }
     return;
   }
+  try{sessionStorage.removeItem(key)}catch(e){}
 }
 const TODAY=new Date(); TODAY.setHours(0,0,0,0);
 

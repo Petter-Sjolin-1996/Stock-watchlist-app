@@ -1,3 +1,4 @@
+:root{--mm-version:"0.19"}
 :root{
   --bg:#F3F5F8; --surface:#FFFFFF; --ink:#16202A; --muted:#67727D; --line:#E2E6EB; --hover:#F6F8FB;
   --blue:#1B5FAA; --blue-dark:#154C89; --blue-soft:#E7EFF9;
@@ -290,3 +291,13 @@ table.versions td.file{color:var(--muted);max-width:260px;overflow:hidden;text-o
 .vp-reset{flex-direction:column;align-items:flex-start;gap:4px}
 .vp-reset > span:last-child{display:flex;gap:18px}
 .vp-reset .link-btn{padding:4px 0}
+
+.updating{position:fixed;top:0;left:0;right:0;z-index:100;background:#13307A;color:#fff;text-align:center;padding:12px 16px;font-size:15px}
+
+/* brand: larger, vertically centred, links to the start page */
+.topbar-inner{min-height:76px;padding:12px 22px;align-items:center}
+.brand{font-size:36px;line-height:1;margin:0;display:flex;align-items:center}
+.brand-link{color:#fff;text-decoration:none;display:inline-block;padding:4px 0}
+.brand-link:hover{opacity:.9}
+.brand-link:focus-visible{outline:2px solid #fff;outline-offset:4px;border-radius:4px}
+@media (max-width:820px){.topbar-inner{min-height:64px;padding:10px 16px}.brand{font-size:30px}}

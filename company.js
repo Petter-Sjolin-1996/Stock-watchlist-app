@@ -306,8 +306,24 @@
       ? `Implied return at today's price: ${(wacc * 100).toFixed(1)}% a year` : "What-if only. Your model is not changed";
   }
 
+  // every section is rendered on its own: if one fails, it shows an error instead of hiding the whole page
+  function safe(title, h, fn) {
+    try { return fn() || ""; }
+    catch (e) {
+      console.error(title, e);
+      return `<section class="card cp-chart"><div class="warn"><b>${h.esc(title)} could not be shown.</b> ${h.esc(e && e.message || String(e))}</div>
+        <div class="actions" style="justify-content:flex-start"><button class="pill" data-action="retry-load">Try again</button></div></section>`;
+    }
+  }
+  const errorBox = (h, title, msg) => `<div class="warn"><b>${h.esc(title)}</b> ${h.esc(msg)}</div>
+    <div class="cp-actions" style="margin-top:10px"><button class="pill" data-action="retry-load">Try again</button></div>`;
+
   function render(el, ctx) {
     const { s, h, latest, data, result, versions, hasTemplate, connected } = ctx;
+    const st = ctx.status || {};
+    const loadingModels = connected && st.models === "loading", modelsFailed = connected && st.models === "error";
+    const nf = (v, d) => v == null || !isFinite(v) ? "–" : h.fmt(v, d);
+    const day = v => v ? h.fmtDate(String(v).slice(0, 10)) : "–";
     const up = latest && s.price ? latest.valuePerShare / s.price - 1 : null;
     const nextRep = s.report ? `next report ${h.fmtDate(s.report)}${h.daysTo(s.report) >= 0 ? ` (in ${h.daysTo(s.report)} days)` : ""}` : "";
     let html = `<a href="#/" class="back">‹ Watchlist</a>
@@ -315,10 +331,10 @@
       <div class="cp-title">${h.flag(s.country)}<div><h1>${h.esc(s.name)}</h1><small>${h.esc(s.ticker)}${nextRep ? " · " + nextRep : ""}</small></div></div>
     </div>
     <div class="cp-stats">
-      <div class="stat"><small>Your value</small><b>${latest ? h.fmt(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? "SEK per share" : "no model yet"}</span></div>
+      <div class="stat"><small>Your value</small><b>${latest ? nf(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? "SEK per share" : loadingModels ? "loading…" : modelsFailed ? "could not load" : "no model yet"}</span></div>
       <div class="stat"><small>Share price</small><b>${s.price != null ? h.fmt(s.price) : "–"}</b><span class="${s.day >= 0 ? "pos" : "neg"}">${s.day != null ? h.pct(s.day, 2) + " today" : ""}</span></div>
       <div class="stat ${up == null ? "" : up >= 0 ? "stat-up" : "stat-down"}"><small>Upside</small><b>${up == null ? "–" : h.pct(up)}</b><span class="dim">${up == null ? "" : up >= 0 ? "your value is above the price" : "your value is below the price"}</span></div>
-      <div class="stat"><small>Model</small><b class="stat-text">${latest ? "Based on " + h.esc(latest.basis) : "No model yet"}</b><span class="dim">${latest ? "uploaded " + h.fmtDate(latest.uploadedAt.slice(0, 10)) : ""}</span></div>
+      <div class="stat"><small>Model</small><b class="stat-text">${latest ? "Based on " + h.esc(latest.basis || "–") : loadingModels ? "Loading…" : modelsFailed ? "Not loaded" : "No model yet"}</b><span class="dim">${latest ? "uploaded " + day(latest.uploadedAt) : ""}</span></div>
     </div>`;
 
     // ---- model card
@@ -327,8 +343,12 @@
       ? `<button class="pill" data-action="download-template"><svg><use href="#i-down"/></svg>Download transfer sheet</button>`
       : `<span class="dim small">No transfer sheet developed yet for this company</span>`;
     html += `<section class="card cp-model"><div class="cp-model-head"><h2>Your model</h2></div>`;
-    if (latest) {
-      html += `<p class="cp-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${h.esc(latest.fileName)}</b><br><span class="dim small">Uploaded ${h.fmtDate(latest.uploadedAt.slice(0, 10))} · based on ${h.esc(latest.basis)} · template ${h.esc(latest.templateVersion || "–")}</span></span></p>
+    if (modelsFailed) {
+      html += errorBox(h, "Your models could not be loaded from GitHub.", st.modelsErr || "");
+    } else if (loadingModels && !latest) {
+      html += `<p class="dim">Loading your models…</p>`;
+    } else if (latest) {
+      html += `<p class="cp-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${h.esc(latest.fileName || "Model")}</b><br><span class="dim small">Uploaded ${day(latest.uploadedAt)} · based on ${h.esc(latest.basis || "–")} · template ${h.esc(latest.templateVersion || "–")}</span></span></p>
       <div class="cp-actions"><button class="pill primary" data-action="upload"><svg><use href="#i-up"/></svg>Upload new version</button>
       <button class="pill" data-action="download-model"><svg><use href="#i-down"/></svg>Download my model</button>${tplBtn}${histBtn}</div>`;
     } else {
@@ -342,14 +362,16 @@
     html += `</section>`;
 
     // ---- key chart: history + your forecast (switchable)
-    const kc = buildKeyChart(ctx);
-    if (kc) html += kc;
+    if (st.actualsErr) html += `<section class="card cp-chart">${errorBox(h, "Historical financials could not be loaded.", st.actualsErr)}</section>`;
+    html += safe("The chart", h, () => buildKeyChart(ctx));
 
     // ---- visuals from the latest model
     if (data && result) {
       const P = data.periods, fc = P.map(p => p.status.toLowerCase() === "forecast");
       const yi = P.map((p, i) => i).filter(i => fc[i] && P[i].kind === "FY");
-      html += valuationCard(ctx);
+      html += safe("The valuation", h, () => valuationCard(ctx));
+      html += safe("Key assumptions", h, () => {
+      let html = "";
 
       // key assumptions table
       const cols = P.map((p, i) => i).filter(i => fc[i]);
@@ -371,23 +393,27 @@
       html += `<section class="card cp-chart"><h2>Key assumptions</h2><p class="sub">From your model. WACC ${pctf(inp.wacc)}, ${tv}.</p>
         <div class="tbl-scroll"><table class="assump"><thead><tr><th>SEK m / %</th>${cols.map(i => `<th>${h.esc(P[i].label)}</th>`).join("")}</tr></thead>
         <tbody>${rows.map(([lab, cells, cls]) => `<tr class="${cls || ""}"><th>${lab}</th>${cells.join("")}</tr>`).join("")}</tbody></table></div></section>`;
+      return html;
+      });
     } else if (latest && connected) {
-      html += `<section class="card cp-chart"><p class="dim">Loading your model…</p></section>`;
+      html += st.modelDataErr
+        ? `<section class="card cp-chart">${errorBox(h, "Your model could not be loaded.", st.modelDataErr)}</section>`
+        : `<section class="card cp-chart"><p class="dim">Loading your model…</p></section>`;
     }
 
     // ---- version history
-    if (versions.length) {
+    html += safe("Version history", h, () => { let html = ""; if (versions.length) {
       html += `<section class="card cp-chart"><h2>Version history</h2><p class="sub">Every upload is kept, so you can follow how your view has changed.</p>
       <div class="tbl-scroll"><table class="versions"><thead><tr><th>Uploaded</th><th>Based on</th><th>Value per share</th><th>Change</th><th>File</th><th></th></tr></thead><tbody>
       ${versions.map((v, i) => {
-        const prev = versions[i + 1], ch = prev ? v.valuePerShare / prev.valuePerShare - 1 : null;
-        return `<tr><td>${h.fmtDate(v.uploadedAt.slice(0, 10))}</td><td>${h.esc(v.basis)}</td><td>${h.fmt(v.valuePerShare)}</td>
+        const prev = versions[i + 1], ch = prev && prev.valuePerShare ? v.valuePerShare / prev.valuePerShare - 1 : null;
+        return `<tr><td>${day(v.uploadedAt)}</td><td>${h.esc(v.basis || "–")}</td><td>${nf(v.valuePerShare)}</td>
         <td>${ch == null ? "<span class='dim'>first</span>" : `<span class="${ch >= 0 ? "pos" : "neg"}">${h.pct(ch)}</span>`}</td>
         <td class="file">${h.esc(v.fileName)}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
       }).join("")}</tbody></table></div></section>`;
-    }
+    } return html; });
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { render, updateValuation, impliedWacc };
+  window.MMCompany = { VERSION: "0.19", render, updateValuation, impliedWacc };
 })();

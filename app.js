@@ -1,5 +1,26 @@
 (function(){
 const $=id=>document.getElementById(id);
+const APP_VERSION="0.19";
+/* ---------- release guard: all files must come from the same release ----------
+   While GitHub Pages deploys an update, the browser can briefly get files from two versions.
+   If so, show a short notice, refresh the files from the server and reload. */
+{
+  const cssV=getComputedStyle(document.documentElement).getPropertyValue("--mm-version").replace(/["'\s]/g,"");
+  const parts=[["models.js",window.MMModels&&window.MMModels.VERSION],["company.js",window.MMCompany&&window.MMCompany.VERSION],["styles.css",cssV]];
+  const off=parts.filter(([,v])=>v!==APP_VERSION);
+  if(off.length){
+    console.warn("Mixed release",APP_VERSION,parts);
+    const bar=document.createElement("div"); bar.className="updating"; bar.textContent="Mr. Market is updating, reloading in a moment…";
+    document.body.prepend(bar);
+    const refresh=async()=>{
+      const files=["index.html","app.js","models.js","company.js","styles.css"];
+      await Promise.all(files.flatMap(f=>[fetch(f,{cache:"reload"}),fetch(`${f}?v=${APP_VERSION}`,{cache:"reload"})]).map(p=>p.catch(()=>null)));
+      location.reload();
+    };
+    setTimeout(refresh,15000);
+    return;
+  }
+}
 const TODAY=new Date(); TODAY.setHours(0,0,0,0);
 
 /* ---------- company data ----------
@@ -69,6 +90,7 @@ function info(t){
 }
 function withModel(s){
   if(!gh.token) return s;
+  if(DS.models!=="ok"){s.value=null;s.model=DS.models==="error"?"Not loaded":"Loading…";return s}
   const lm=latestModel(s.ticker);
   s.value=lm?lm.valuePerShare:null; s.model=lm?`Based on ${lm.basis}`:null;
   return s;
@@ -92,7 +114,8 @@ async function loadMarket(showToast){
 }
 function renderStatus(){
   const el=$("data-status"); if(!el) return;
-  if(MARKET) el.innerHTML=`Prices and key figures: end of day ${esc(fmtDate(MARKET.asOf))}, from Yahoo Finance (updated every weekday evening).${marketError?` <b class="neg">${esc(marketError)}</b>`:""}`;
+  const mErr=DS.models==="error"?` <b class="neg">Your models could not be loaded: ${esc(DS.modelsErr)}</b>`:"";
+  if(MARKET) el.innerHTML=`Prices and key figures: end of day ${esc(fmtDate(MARKET.asOf))}, from Yahoo Finance (updated every weekday evening).${marketError?` <b class="neg">${esc(marketError)}</b>`:""}${mErr}`;
   else el.innerHTML=marketError?`<b class="neg">${esc(marketError)}</b> Showing demo data.`:"Showing demo data. Connect GitHub under Settings to load real prices.";
 }
 
@@ -334,21 +357,39 @@ $("gh-remove").onclick=()=>{gh.token="";try{localStorage.setItem(GH_KEY,JSON.str
    models/index.json lists every upload (newest first); each upload has the original .xlsx and a .json
    with what Mr. Market read. Blank transfer sheets live in templates/<TICKER>_transfer_sheet.xlsx */
 let MODEL_INDEX=[], TEMPLATES=new Set(); const MODEL_DATA={}, ACTUALS={};
+// load status, so the page never shows "No model yet" when the data simply failed to load
+const DS={models:"idle",modelsErr:"",templatesErr:""}, ACT_ERR={}, MODEL_ERR={}, RETRY_AT={};
+const httpErr=st=>st===401?"GitHub did not accept the token (401). Check it under Settings.":
+  st===403?"GitHub refused access (403). The token may lack access to the data repo, or the rate limit was reached.":
+  st===404?"File not found (404).":`GitHub returned error ${st}.`;
+const netErr=e=>e&&e.name==="TypeError"?"No connection to GitHub. Check your internet connection.":(e&&e.message)||String(e);
 let chartMetric="sales"; const WACC_OVERRIDE={};
 const safeT=t=>t.replace(/\s+/g,"-");
 const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
 function latestModel(t){return MODEL_INDEX.find(m=>m.ticker===t)||null}
 async function loadModels(){
-  if(!gh.token){MODEL_INDEX=[];TEMPLATES=new Set();renderAll();return}
+  if(!gh.token){MODEL_INDEX=[];TEMPLATES=new Set();DS.models="idle";renderAll();return}
+  DS.models="loading"; DS.modelsErr=""; renderAll();
   try{
     const r=await ghApi("/contents/models/index.json",{headers:{Accept:"application/vnd.github.raw+json"}});
-    if(r.ok){const d=await r.json();MODEL_INDEX=(d.models||[]).sort((a,b)=>b.uploadedAt.localeCompare(a.uploadedAt))}
-    else if(r.status===404) MODEL_INDEX=[];
-  }catch(e){}
+    if(r.status===404){MODEL_INDEX=[]}
+    else if(!r.ok){throw new Error(httpErr(r.status))}
+    else{
+      let d; try{d=JSON.parse(await r.text())}catch(e){throw new Error("models/index.json is not valid JSON.")}
+      const list=Array.isArray(d&&d.models)?d.models:[];
+      MODEL_INDEX=list.filter(m=>m&&m.ticker&&m.json&&m.xlsx)
+        .map(m=>Object.assign({uploadedAt:"",basis:"",fileName:"Model",valuePerShare:null},m))
+        .sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
+    }
+    DS.models="ok";
+  }catch(e){DS.models="error";DS.modelsErr=netErr(e);console.error("loadModels",e)}
   try{
     const r=await ghApi("/contents/templates");
-    if(r.ok){const list=await r.json();TEMPLATES=new Set((Array.isArray(list)?list:[]).map(f=>f.name).filter(n=>/_transfer_sheet\.xlsx$/i.test(n)).map(n=>n.replace(/_transfer_sheet\.xlsx$/i,"")))}
-  }catch(e){}
+    if(r.status===404){TEMPLATES=new Set()}
+    else if(!r.ok){throw new Error(httpErr(r.status))}
+    else{const list=await r.json();TEMPLATES=new Set((Array.isArray(list)?list:[]).map(f=>f.name).filter(n=>/_transfer_sheet\.xlsx$/i.test(n)).map(n=>n.replace(/_transfer_sheet\.xlsx$/i,"")))}
+    DS.templatesErr="";
+  }catch(e){DS.templatesErr=netErr(e);console.error("templates",e)}
   renderAll();
 }
 const b64bytes=buf=>{const u8=new Uint8Array(buf);let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)};
@@ -388,35 +429,59 @@ function showCompany(t){
 }
 const LOADING=new Set();
 const actualsPath=t=>`actuals/${safeT(t)}_actuals.xlsx`;
+// a failed load is never remembered as "no data": it shows an error and is retried (after 20 s or on "Try again")
 async function ensureActuals(t){
   if(ACTUALS[t]!==undefined||LOADING.has("A:"+t)||!gh.token) return;
+  if(ACT_ERR[t]&&Date.now()<(RETRY_AT["A:"+t]||0)) return;
   LOADING.add("A:"+t);
   try{
     const r=await ghApi("/contents/"+encPath(actualsPath(t)),{headers:{Accept:"application/vnd.github.raw+json"}});
-    ACTUALS[t]=r.ok?await MMModels.readActuals(await r.arrayBuffer()):null;
-  }catch(e){ACTUALS[t]=null}
+    if(r.status===404) ACTUALS[t]=null;
+    else if(!r.ok) throw new Error(httpErr(r.status));
+    else ACTUALS[t]=await MMModels.readActuals(await r.arrayBuffer());
+    delete ACT_ERR[t];
+  }catch(e){ACT_ERR[t]=netErr(e);RETRY_AT["A:"+t]=Date.now()+20000;console.error("actuals",e)}
   finally{LOADING.delete("A:"+t)}
   if(currentCompany===t) renderCompany();
 }
 async function ensureModelData(t,path){
   if(MODEL_DATA[path]||LOADING.has(path)||!gh.token) return;
+  if(MODEL_ERR[path]&&Date.now()<(RETRY_AT[path]||0)) return;
   LOADING.add(path);
-  try{const r=await getJson(path); if(r.data){MODEL_DATA[path]=r.data; if(currentCompany===t) renderCompany()}}catch(e){}
+  try{
+    const r=await getJson(path);
+    if(!r.data) throw new Error("The saved model file was not found in the data repo.");
+    MODEL_DATA[path]=r.data; delete MODEL_ERR[path];
+  }catch(e){MODEL_ERR[path]=netErr(e);RETRY_AT[path]=Date.now()+20000;console.error("model",e)}
   finally{LOADING.delete(path)}
+  if(currentCompany===t) renderCompany();
+}
+function retryLoads(){
+  for(const k in ACT_ERR) delete ACT_ERR[k];
+  for(const k in MODEL_ERR) delete MODEL_ERR[k];
+  for(const k in RETRY_AT) delete RETRY_AT[k];
+  for(const k in ACTUALS) if(ACTUALS[k]===null) delete ACTUALS[k];
+  loadModels(); renderCompany();
 }
 function companyCtx(){
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
   let result=null; try{result=data?MMModels.computeValuation(data):null}catch(e){}
   return {s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
     versions:MODEL_INDEX.filter(m=>m.ticker===t),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
-    wacc:lm?WACC_OVERRIDE[lm.json]:undefined,h:{fmt,pct,esc,fmtDate,flag,daysTo}};
+    wacc:lm?WACC_OVERRIDE[lm.json]:undefined,h:{fmt,pct,esc,fmtDate,flag,daysTo},
+    status:{models:DS.models,modelsErr:DS.modelsErr,actualsErr:ACT_ERR[t]||"",modelDataErr:lm?MODEL_ERR[lm.json]||"":""}};
 }
 function renderCompany(){
   if(!currentCompany) return;
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
   if(lm&&!data) ensureModelData(t,lm.json);
   ensureActuals(t);
-  MMCompany.render($("view-company"),companyCtx());
+  try{MMCompany.render($("view-company"),companyCtx())}
+  catch(e){
+    console.error("company page",e);
+    $("view-company").innerHTML=`<div class="cp"><a href="#/" class="back">‹ Watchlist</a><section class="card cp-chart"><div class="warn"><b>This page could not be shown.</b> ${esc(e&&e.message||String(e))}</div>
+      <div class="cp-actions" style="margin-top:10px"><button class="pill" data-action="retry-load">Try again</button></div></section></div>`;
+  }
 }
 // WACC slider: recalculates instantly while dragging; only the valuation card is redrawn
 $("view-company").addEventListener("input",e=>{
@@ -426,6 +491,7 @@ $("view-company").addEventListener("input",e=>{
   MMCompany.updateValuation($("view-company"),companyCtx(),w);
 });
 window.addEventListener("hashchange",route);
+document.querySelector(".brand-link").addEventListener("click",()=>{if(location.hash==="#/"||location.hash===""){route();window.scrollTo(0,0)}});
 
 /* ---------- upload: read, review, save ---------- */
 let pending=null;
@@ -439,6 +505,7 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
     else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_financials.xlsx`)}
     else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
+    else if(a==="retry-load"){toast("Loading again…");retryLoads()}
     else if(a==="wacc-implied"){const lm=latestModel(t);if(lm){const r=MMCompany.impliedWacc(companyCtx());
       if(r.error){toast(r.error)}else{WACC_OVERRIDE[lm.json]=r.wacc;MMCompany.updateValuation($("view-company"),companyCtx(),r.wacc)}}}
     else if(a==="wacc-reset"){const lm=latestModel(t);if(lm){delete WACC_OVERRIDE[lm.json];MMCompany.updateValuation($("view-company"),companyCtx(),MODEL_DATA[lm.json].inputs.wacc)}}
@@ -491,8 +558,9 @@ async function saveModel(){
       fileName:file.name,xlsx:xlsxPath,json:jsonPath,templateVersion:res.model.templateVersion||null};
     list.unshift(entry);
     await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
-    MODEL_INDEX=list.sort((a,b)=>b.uploadedAt.localeCompare(a.uploadedAt)); MODEL_DATA[jsonPath]=data;
-    closeAll(); renderAll(); toast(`Model saved: ${fmt(entry.valuePerShare)} per share`);
+    MODEL_INDEX=list.sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt))); MODEL_DATA[jsonPath]=data; DS.models="ok";
+    closeAll(); toast(`Model saved: ${fmt(entry.valuePerShare)} per share`);
+    try{renderAll()}catch(e){console.error(e)}
   }catch(err){btn.disabled=false;btn.textContent="Save model";toast(err.message)}
 }
 
@@ -500,7 +568,6 @@ async function saveModel(){
    version.json in the repo always holds the latest version. If it differs from the code that is
    running, the page reloads itself with ?v=<new version>, which makes Safari fetch fresh files.
    Runs in the background, so it never slows the app down. */
-const APP_VERSION="0.16";
 let lastCheck=0;
 async function checkForUpdate(){
   if(Date.now()-lastCheck<60000) return; lastCheck=Date.now();
@@ -515,6 +582,8 @@ async function checkForUpdate(){
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkForUpdate()});
 
 function renderAll(){renderBanner();renderTable();renderStatus();renderCompany()}
+window.addEventListener("error",e=>{if(e&&e.message)toast("Something went wrong: "+e.message)});
+window.addEventListener("unhandledrejection",e=>{const m=e&&e.reason&&(e.reason.message||String(e.reason));if(m)toast("Something went wrong: "+m)});
 $("app-version").textContent=APP_VERSION;
 renderAll();
 route();

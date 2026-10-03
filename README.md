@@ -35,3 +35,9 @@ Bump the number in four places: `version.json`, `APP_VERSION` in `app.js`, and t
 - v0.14: valuation card with value-per-share panel (share price, upside) and a WACC slider with reset to the model's WACC.
 - v0.15: 'Match share price' sets the WACC so your value equals today's share price (market-implied return); neutral label at 0.0% upside.
 - v0.16: button renamed to 'Implied return'.
+- v0.17: robust loading: loading and error states instead of 'No model yet', retry, failed loads never cached as 'no data', each page section fails independently, unexpected errors shown.
+- v0.18: release guard: if files from two versions are loaded during a deployment, the app shows a notice, refreshes the files and reloads.
+
+## Releasing
+Upload all changed files in one commit (Add file → Upload files), so GitHub Pages deploys them together. Bump the version in version.json, APP_VERSION in app.js, VERSION in models.js and company.js, --mm-version in styles.css and the ?v= tags in index.html.
+- v0.19: larger, vertically centred Mr. Market logo that links to the start page.

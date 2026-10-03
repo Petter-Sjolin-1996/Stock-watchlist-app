@@ -248,7 +248,7 @@ function bars(v){
 
 /* ---------- toast ---------- */
 let undo=null, tt=null;
-function toast(msg,undoFn){$("toast-msg").textContent=msg;undo=undoFn||null;$("toast-undo").hidden=!undoFn;$("toast").classList.add("show");clearTimeout(tt);tt=setTimeout(()=>$("toast").classList.remove("show"),5000)}
+function toast(msg,undoFn,label){$("toast-msg").textContent=msg;undo=undoFn||null;$("toast-undo").hidden=!undoFn;$("toast-undo").textContent=label||"Undo";$("toast").classList.add("show");clearTimeout(tt);tt=setTimeout(()=>$("toast").classList.remove("show"),5000)}
 $("toast-undo").onclick=()=>{if(undo)undo();undo=null;$("toast").classList.remove("show")};
 
 /* ---------- actions ---------- */
@@ -346,7 +346,27 @@ $("gh-save").onclick=async()=>{
 $("gh-remove").onclick=()=>{gh.token="";try{localStorage.setItem(GH_KEY,JSON.stringify(gh));localStorage.removeItem(MKT_KEY)}catch(e){}
   MARKET=null;marketError="";closeAll();renderAll();toast("Token removed. Showing demo data.")};
 
+/* ---------- automatic update check ----------
+   version.json in the repo always holds the latest version. If it differs from the code that is
+   running, the page reloads itself with ?v=<new version>, which makes Safari fetch fresh files.
+   Runs in the background, so it never slows the app down. */
+const APP_VERSION="0.9";
+let lastCheck=0;
+async function checkForUpdate(){
+  if(Date.now()-lastCheck<60000) return; lastCheck=Date.now();
+  try{
+    const r=await fetch("version.json?t="+Date.now(),{cache:"no-store"}); if(!r.ok) return;
+    const v=String((await r.json()).version||""); if(!v||v===APP_VERSION) return;
+    const url=new URL(location.href);
+    if(url.searchParams.get("v")===v){toast(`Version ${v} is ready`,()=>location.reload(),"Reload");return} // GitHub still publishing
+    url.searchParams.set("v",v); location.replace(url.toString());
+  }catch(e){}
+}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkForUpdate()});
+
 function renderAll(){renderBanner();renderTable();renderStatus()}
+$("app-version").textContent=APP_VERSION;
 renderAll();
 loadMarket(false);
+checkForUpdate();
 })();

@@ -57,14 +57,20 @@ let marketError="";
 const KPI_KEYS=["mcap","dy","vol","beta","pe","ps","pb","roe"], HIST_KEYS=["1d","1w","1m","3m","6m","ytd","1y","3y","5y"];
 function info(t){
   const s=demoInfo(t); if(!s) return null;
-  if(!MARKET) return s;
+  if(!MARKET) return withModel(s);
   const m=MARKET.stocks&&MARKET.stocks[t];
   Object.assign(s,{price:null,day:null,kpi:KPI_KEYS.map(()=>null),hist:HIST_KEYS.map(()=>null),report:s.value!=null?s.report:null});
-  if(!m) return s;
+  if(!m) return withModel(s);
   s.price=m.price??null; s.day=m.day??null; s.priceDate=m.date||MARKET.asOf||null;
   s.kpi=KPI_KEYS.map(k=>m.kpi&&m.kpi[k]!=null?m.kpi[k]:null);
   s.hist=HIST_KEYS.map(k=>m.hist&&m.hist[k]!=null?m.hist[k]:null);
   if(m.nextReport) s.report=m.nextReport;
+  return withModel(s);
+}
+function withModel(s){
+  if(!gh.token) return s;
+  const lm=latestModel(s.ticker);
+  s.value=lm?lm.valuePerShare:null; s.model=lm?`Based on ${lm.basis}`:null;
   return s;
 }
 async function loadMarket(showToast){
@@ -200,7 +206,7 @@ function renderAddList(){
 
 /* ---------- dialogs ---------- */
 function openDlg(id){closeAll();$(id).classList.add("open");$("scrim").classList.add("open")}
-function closeAll(){["dlg-new","dlg-manage","dlg-add","dlg-settings","drawer","scrim"].forEach(i=>$(i).classList.remove("open"));toggleMenu(false)}
+function closeAll(){["dlg-new","dlg-manage","dlg-add","dlg-settings","dlg-review","scrim"].forEach(i=>$(i).classList.remove("open"));toggleMenu(false)}
 function manageView(step){
   const a=active(), n=a.tickers.length, b=$("manage-body");
   if(step===1){
@@ -224,28 +230,6 @@ function nameError(name,exceptId){
   return "";
 }
 
-/* ---------- drawer ---------- */
-function openDrawer(t){
-  const s=info(t); if(!s) return;
-  $("d-title").textContent=s.name;
-  let h=`<div class="big"><div><small>Last price</small><b>${s.price!=null?fmt(s.price):"–"}</b></div>`;
-  if(s.value!=null){const u=up(s);
-    h+=`<div><small>Your value</small><b>${fmt(s.value)}</b></div><div><small>Upside</small><b class="${u>=0?'pos':'neg'}">${pct(u)}</b></div></div>
-    <dl class="kv"><dt>Model</dt><dd>${s.model}</dd><dt>Valuation date</dt><dd>${s.vdate}</dd><dt>WACC</dt><dd>${s.wacc}</dd><dt>Terminal value</dt><dd>${s.terminal}</dd><dt>Next report</dt><dd>${s.report?fmtDate(s.report):"–"}</dd></dl>
-    <p class="minititle">Net sales, MSEK: actual and your forecast</p>${bars(s.sales)}
-    <p class="note">The full company page, with actual vs your forecast per business area and drill-downs, is the next step.</p>`;
-  } else {
-    h+=`</div><dl class="kv"><dt>Day change</dt><dd class="${s.day>=0?'pos':'neg'}">${s.day!=null?pct(s.day,2):"–"}</dd><dt>Next report</dt><dd>${s.report?fmtDate(s.report):"–"}</dd></dl>
-    <div class="emptybox"><b style="color:var(--ink)">No model yet</b><br>Upload a transfer sheet for ${esc(s.name)} to see your value, your forecast and how actual results compare.<br><br><button class="pill primary" data-soon>Upload transfer sheet</button></div>`;
-  }
-  $("d-body").innerHTML=h; $("drawer").classList.add("open"); $("scrim").classList.add("open");
-}
-function bars(v){
-  const W=400,H=150,bw=W/v.length,mx=Math.max(...v);
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Net sales actual and forecast">${v.map((x,i)=>{const h=x/mx*(H-28),a=i<2;
-    return `<rect x="${i*bw+6}" y="${H-18-h}" width="${bw-12}" height="${h}" rx="3" fill="${a?'var(--ink)':'var(--blue)'}" opacity="${a?1:.5}"/><text x="${i*bw+bw/2}" y="${H-4}" font-size="11" text-anchor="middle" fill="var(--muted)">${24+i}${a?'A':'E'}</text>`}).join("")}</svg>`;
-}
-
 /* ---------- toast ---------- */
 let undo=null, tt=null;
 function toast(msg,undoFn,label){$("toast-msg").textContent=msg;undo=undoFn||null;$("toast-undo").hidden=!undoFn;$("toast-undo").textContent=label||"Undo";$("toast").classList.add("show");clearTimeout(tt);tt=setTimeout(()=>$("toast").classList.remove("show"),5000)}
@@ -264,7 +248,7 @@ document.addEventListener("click",e=>{
   if(t.dataset.remove!==undefined){removeTicker(t.dataset.remove)}
   else if(t.dataset.add){addTicker(t.dataset.add);renderResults();renderAddList()}
   else if(t.dataset.tab){setTab(t.dataset.tab)}
-  else if(t.dataset.open){e.preventDefault();openDrawer(t.dataset.open)}
+  else if(t.dataset.open){e.preventDefault();location.hash="#/c/"+encodeURIComponent(t.dataset.open)}
   else if(t.hasAttribute("data-close")) closeAll();
   else if(t.dataset.pick){state.active=t.dataset.pick;save();toggleMenu(false);renderAll()}
   else if(t.dataset.m!==undefined) manageView(+t.dataset.m);
@@ -341,16 +325,152 @@ $("gh-save").onclick=async()=>{
   if(!owner||!repo||!token){$("gh-err").textContent="Fill in owner, repository and token.";return}
   gh={owner,repo,token}; try{localStorage.setItem(GH_KEY,JSON.stringify(gh))}catch(e){}
   $("gh-save").disabled=true; const ok=await loadMarket(false); $("gh-save").disabled=false;
-  if(ok){closeAll();toast(`Connected. Prices from ${fmtDate(MARKET.asOf)}`)} else $("gh-err").textContent=marketError;
+  if(ok){closeAll();toast(`Connected. Prices from ${fmtDate(MARKET.asOf)}`);loadModels()} else $("gh-err").textContent=marketError;
 };
 $("gh-remove").onclick=()=>{gh.token="";try{localStorage.setItem(GH_KEY,JSON.stringify(gh));localStorage.removeItem(MKT_KEY)}catch(e){}
-  MARKET=null;marketError="";closeAll();renderAll();toast("Token removed. Showing demo data.")};
+  MARKET=null;marketError="";MODEL_INDEX=[];TEMPLATES=new Set();closeAll();renderAll();toast("Token removed. Showing demo data.")};
+
+/* ---------- models in the data repo ----------
+   models/index.json lists every upload (newest first); each upload has the original .xlsx and a .json
+   with what Mr. Market read. Blank transfer sheets live in templates/<TICKER>_transfer_sheet.xlsx */
+let MODEL_INDEX=[], TEMPLATES=new Set(); const MODEL_DATA={};
+const safeT=t=>t.replace(/\s+/g,"-");
+const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
+function latestModel(t){return MODEL_INDEX.find(m=>m.ticker===t)||null}
+async function loadModels(){
+  if(!gh.token){MODEL_INDEX=[];TEMPLATES=new Set();renderAll();return}
+  try{
+    const r=await ghApi("/contents/models/index.json",{headers:{Accept:"application/vnd.github.raw+json"}});
+    if(r.ok){const d=await r.json();MODEL_INDEX=(d.models||[]).sort((a,b)=>b.uploadedAt.localeCompare(a.uploadedAt))}
+    else if(r.status===404) MODEL_INDEX=[];
+  }catch(e){}
+  try{
+    const r=await ghApi("/contents/templates");
+    if(r.ok){const list=await r.json();TEMPLATES=new Set((Array.isArray(list)?list:[]).map(f=>f.name).filter(n=>/_transfer_sheet\.xlsx$/i.test(n)).map(n=>n.replace(/_transfer_sheet\.xlsx$/i,"")))}
+  }catch(e){}
+  renderAll();
+}
+const b64bytes=buf=>{const u8=new Uint8Array(buf);let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)};
+const b64text=str=>b64bytes(new TextEncoder().encode(str));
+async function putFile(path,content,message,sha){
+  const body={message,content}; if(sha) body.sha=sha;
+  const r=await ghApi("/contents/"+encPath(path),{method:"PUT",body:JSON.stringify(body),headers:{"Content-Type":"application/json"}});
+  if(!r.ok) throw new Error(r.status===401||r.status===403?"GitHub did not allow saving. Check that the token has Contents: Read and write.":`GitHub returned error ${r.status} while saving.`);
+  return r.json();
+}
+async function getJson(path){
+  const r=await ghApi("/contents/"+encPath(path));
+  if(r.status===404) return {sha:null,data:null};
+  if(!r.ok) throw new Error(`GitHub returned error ${r.status}.`);
+  const d=await r.json(), bin=atob(d.content.replace(/\n/g,""));
+  return {sha:d.sha,data:JSON.parse(new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0))))};
+}
+async function downloadPath(path,name){
+  const r=await ghApi("/contents/"+encPath(path),{headers:{Accept:"application/vnd.github.raw+json"}});
+  if(!r.ok) throw new Error(r.status===404?"The file was not found in the data repo.":`GitHub returned error ${r.status}.`);
+  const blob=new Blob([await r.arrayBuffer()],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);
+}
+
+/* ---------- routing: #/c/<ticker> shows the company page ---------- */
+let currentCompany=null;
+function route(){
+  const m=/^#\/c\/(.+)$/.exec(location.hash);
+  if(m&&info(decodeURIComponent(m[1]))){showCompany(decodeURIComponent(m[1]))}
+  else{currentCompany=null;$("view-company").hidden=true;$("view-watchlist").hidden=false}
+}
+function showCompany(t){
+  const first=currentCompany!==t; currentCompany=t;
+  $("view-watchlist").hidden=true; $("view-company").hidden=false; if(first) window.scrollTo(0,0);
+  renderCompany();
+}
+const LOADING=new Set();
+async function ensureModelData(t,path){
+  if(MODEL_DATA[path]||LOADING.has(path)||!gh.token) return;
+  LOADING.add(path);
+  try{const r=await getJson(path); if(r.data){MODEL_DATA[path]=r.data; if(currentCompany===t) renderCompany()}}catch(e){}
+  finally{LOADING.delete(path)}
+}
+function renderCompany(){
+  if(!currentCompany) return;
+  const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
+  if(lm&&!data) ensureModelData(t,lm.json);
+  let result=null; try{result=data?MMModels.computeValuation(data):null}catch(e){}
+  MMCompany.render($("view-company"),{s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
+    versions:MODEL_INDEX.filter(m=>m.ticker===t),latest:lm,data,result,h:{fmt,pct,esc,fmtDate,flag,daysTo}});
+}
+window.addEventListener("hashchange",route);
+
+/* ---------- upload: read, review, save ---------- */
+let pending=null;
+$("view-company").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-action]"); if(!b) return;
+  const t=currentCompany, a=b.dataset.action;
+  try{
+    if(a==="upload"){$("model-file").value="";$("model-file").click()}
+    else if(a==="download-template"){toast("Downloading…");await downloadPath(`templates/${safeT(t)}_transfer_sheet.xlsx`,`${safeT(t)}_transfer_sheet.xlsx`)}
+    else if(a==="download-model"){const lm=latestModel(t);toast("Downloading…");await downloadPath(lm.xlsx,lm.fileName)}
+    else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
+  }catch(err){toast(err.message)}
+});
+$("model-file").addEventListener("change",async()=>{
+  const file=$("model-file").files[0]; if(!file||!currentCompany) return;
+  const t=currentCompany, name=info(t).name;
+  openDlg("dlg-review"); $("review-body").innerHTML=`<p class="dim">Reading ${esc(file.name)}…</p>`;
+  try{
+    const buf=await file.arrayBuffer();
+    const res=await MMModels.parseTransferSheet(buf,t);
+    pending={t,file,buf,res}; renderReview();
+  }catch(err){$("review-body").innerHTML=`<div class="warn"><b>Could not read the file.</b> ${esc(err.message||String(err))}</div>
+    <div class="actions"><button class="pill" data-close>Close</button></div>`}
+});
+function renderReview(){
+  const {t,file,res}=pending, s=info(t), prev=latestModel(t), r=res.result;
+  const ok=[], bad=res.errors, warn=res.warnings;
+  if(!bad.length){
+    ok.push("Transfer sheet found and all forecast cells are filled");
+    if(res.model.sheet&&res.model.sheet.vps!=null&&!warn.some(w=>w.startsWith("The sheet's own value"))) ok.push(`Value per share matches the sheet (${fmt(res.model.sheet.vps)})`);
+  }
+  const up=r&&s.price?r.vps/s.price-1:null;
+  let h=`<p class="rv-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${esc(file.name)}</b><br><span class="dim small">${esc(res.model&&res.model.company||"")}${res.model&&res.model.basis?" · based on "+esc(res.model.basis):""}${res.model&&res.model.templateVersion?" · template "+esc(res.model.templateVersion):""}</span></span></p>`;
+  if(r) h+=`<div class="rv-stats"><div><small>Your value</small><b>${fmt(r.vps)}</b></div><div><small>Share price</small><b>${s.price!=null?fmt(s.price):"–"}</b></div>
+    <div><small>Upside</small><b class="${up==null?"":up>=0?"pos":"neg"}">${up==null?"–":pct(up)}</b></div>
+    <div><small>vs last version</small><b>${prev?`<span class="${r.vps>=prev.valuePerShare?"pos":"neg"}">${pct(r.vps/prev.valuePerShare-1)}</span>`:"<span class='dim'>first</span>"}</b></div></div>`;
+  h+=`<ul class="checks">${bad.map(x=>`<li class="bad">${esc(x)}</li>`).join("")}${warn.map(x=>`<li class="warn-i">${esc(x)}</li>`).join("")}${ok.map(x=>`<li class="good">${esc(x)}</li>`).join("")}</ul>`;
+  const canSave=!bad.length&&!!gh.token;
+  h+=`${!gh.token?`<p class="note">Connect GitHub under Settings to save models.</p>`:""}
+    <div class="actions"><button class="pill" data-close>Cancel</button><button class="pill primary" id="rv-save" ${canSave?"":"disabled"}>Save model</button></div>`;
+  $("review-body").innerHTML=h;
+  const btn=$("rv-save"); if(btn) btn.onclick=saveModel;
+}
+async function saveModel(){
+  const {t,file,buf,res}=pending, btn=$("rv-save");
+  btn.disabled=true; btn.textContent="Saving…";
+  try{
+    const now=new Date(), stamp=now.toISOString().replace(/[-:]/g,"").slice(0,15);
+    const base=`models/${safeT(t)}/${stamp}`, safeName=file.name.replace(/[^\w.\-]+/g,"_");
+    const xlsxPath=`${base}_${safeName}`, jsonPath=`${base}.json`;
+    const msg=`Upload model ${t} (${res.model.basis||"no basis"})`;
+    await putFile(xlsxPath,b64bytes(buf),msg);
+    const data=Object.assign({},res.model,{ticker:t,fileName:file.name,uploadedAt:now.toISOString()});
+    await putFile(jsonPath,b64text(JSON.stringify(data)),msg);
+    const idx=await getJson("models/index.json");
+    const list=(idx.data&&idx.data.models)||[];
+    const entry={ticker:t,uploadedAt:now.toISOString(),basis:res.model.basis,valuePerShare:+res.result.vps.toFixed(4),
+      fileName:file.name,xlsx:xlsxPath,json:jsonPath,templateVersion:res.model.templateVersion||null};
+    list.unshift(entry);
+    await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
+    MODEL_INDEX=list.sort((a,b)=>b.uploadedAt.localeCompare(a.uploadedAt)); MODEL_DATA[jsonPath]=data;
+    closeAll(); renderAll(); toast(`Model saved: ${fmt(entry.valuePerShare)} per share`);
+  }catch(err){btn.disabled=false;btn.textContent="Save model";toast(err.message)}
+}
 
 /* ---------- automatic update check ----------
    version.json in the repo always holds the latest version. If it differs from the code that is
    running, the page reloads itself with ?v=<new version>, which makes Safari fetch fresh files.
    Runs in the background, so it never slows the app down. */
-const APP_VERSION="0.9";
+const APP_VERSION="0.10";
 let lastCheck=0;
 async function checkForUpdate(){
   if(Date.now()-lastCheck<60000) return; lastCheck=Date.now();
@@ -364,9 +484,11 @@ async function checkForUpdate(){
 }
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkForUpdate()});
 
-function renderAll(){renderBanner();renderTable();renderStatus()}
+function renderAll(){renderBanner();renderTable();renderStatus();renderCompany()}
 $("app-version").textContent=APP_VERSION;
 renderAll();
+route();
 loadMarket(false);
+loadModels();
 checkForUpdate();
 })();

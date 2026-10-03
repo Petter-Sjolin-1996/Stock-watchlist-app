@@ -20,8 +20,8 @@
     `<text x="${x}" y="${y}" text-anchor="${o.anchor || "middle"}" font-size="${o.size || 12}" font-weight="${o.weight || 400}" fill="${o.fill || "var(--ink)"}"${o.ls ? ` letter-spacing="${o.ls}"` : ""}>${txt}</text>`;
 
   /* waterfall from cash flows to equity value (same look as the key chart) */
-  function waterfall(steps, h) {
-    const l = 10, r = 10, t = 34, b = 46, cw = W - l - r, ch = H - t - b;
+  function waterfall(steps, h, VW = W) {
+    const W = VW, l = 10, r = 10, t = 34, b = 46, cw = W - l - r, ch = H - t - b;
     let run = 0, hi = 0;
     const bars = steps.map(s => {
       if (s.total) { run = s.value; hi = Math.max(hi, run); return { ...s, from: 0, to: s.value }; }
@@ -229,6 +229,67 @@
     </section>`;
   }
 
+  /* ================= valuation: waterfall + value per share panel with a WACC slider ================= */
+  const withWacc = (data, wacc) => Object.assign({}, data, { inputs: Object.assign({}, data.inputs, { wacc }) });
+  function waccRange(data) {
+    const g = String(data.inputs.method || "").toLowerCase() === "terminal growth" ? (data.inputs.growth || 0) : -1;
+    return { min: Math.max(4, Math.ceil((g + 0.005) * 1000) / 10), max: 16 };
+  }
+  function valuationParts(ctx, wacc) {
+    const { data, h, s } = ctx;
+    const res = MMModels.computeValuation(withWacc(data, wacc));
+    const fy = data.periods.filter(p => p.kind === "FY"), lastY = fy.length ? fy[fy.length - 1].label.slice(-2) : "";
+    const firstY = data.periods.length ? data.periods[0].label.slice(-4) : "";
+    const steps = [
+      { label: `Cash flows\n${firstY}–${lastY}`, value: res.sumPv },
+      { label: "Terminal\nvalue", value: res.pvTv },
+      { label: "Enterprise\nvalue", value: res.ev, total: true },
+      { label: "Net\ndebt", value: -res.netDebt },
+      { label: "Lease\nliabilities", value: -res.leases },
+      { label: "Earn-outs\n& options", value: -res.other },
+      { label: "Equity\nvalue", value: res.equity, total: true }
+    ];
+    const price = s.price, up = price ? res.vps / price - 1 : null;
+    const calc = `
+      <div class="vp-row"><span>Equity value</span><b>${h.fmt(res.equity, 0)}</b></div>
+      <div class="vp-row"><span>÷ Shares outstanding, m</span><b>${h.fmt(data.inputs.shares)}</b></div>
+      <div class="vp-row vp-total"><span>Value per share</span><b>SEK ${h.fmt(res.vps)}</b></div>
+      <div class="vp-row"><span>Share price${s.priceDate ? `<small>as of ${h.fmtDate(s.priceDate)}</small>` : ""}</span><b>${price != null ? "SEK " + h.fmt(price) : "–"}</b></div>
+      <div class="vp-row vp-up"><span>${up == null ? "Upside" : up >= 0 ? "Upside" : "Downside"}</span><b class="${up == null ? "" : up >= 0 ? "pos" : "neg"}">${up == null ? "–" : h.pct(up)}</b></div>`;
+    return { chart: waterfall(steps, h, 560), calc, note: `Present values at a WACC of ${(wacc * 100).toFixed(1)}%`, res };
+  }
+  function valuationCard(ctx) {
+    const { data } = ctx, base = data.inputs.wacc, wacc = ctx.wacc != null ? ctx.wacc : base, rg = waccRange(data);
+    const parts = valuationParts(ctx, wacc);
+    return `<section class="card cp-chart kc" id="valuation-card"><div class="kc-title"><h2>From cash flows to value</h2><span class="unit">SEK m</span></div>
+      <div class="vc-grid">
+        <div class="vc-chart"><div id="wf-chart">${parts.chart}</div><ul class="kc-notes"><li id="wf-note">${parts.note}</li></ul></div>
+        <aside class="vc-panel">
+          <div id="wf-calc">${parts.calc}</div>
+          <div class="vp-wacc">
+            <div class="vp-row"><span>WACC</span><b id="wacc-val">${(wacc * 100).toFixed(1)}%</b></div>
+            <input type="range" id="wacc-slider" min="${rg.min}" max="${rg.max}" step="0.1" value="${(wacc * 100).toFixed(1)}" aria-label="WACC">
+            <div class="vp-scale"><span>${rg.min}%</span><span>${rg.max}%</span></div>
+            <div class="vp-reset"><span class="dim small">Your model: ${(base * 100).toFixed(1)}%</span>
+              <button class="link-btn" data-action="wacc-reset" ${Math.abs(wacc - base) < 1e-9 ? "disabled" : ""}>Reset</button></div>
+            <p class="dim small vp-hint">What-if only. Your model is not changed</p>
+          </div>
+        </aside>
+      </div></section>`;
+  }
+  // fast update while dragging the slider: only the chart and the numbers are redrawn
+  function updateValuation(root, ctx, wacc) {
+    const card = root.querySelector("#valuation-card");
+    if (!card || !ctx.data) return;
+    const parts = valuationParts(ctx, wacc), base = ctx.data.inputs.wacc;
+    card.querySelector("#wf-chart").innerHTML = parts.chart;
+    card.querySelector("#wf-calc").innerHTML = parts.calc;
+    card.querySelector("#wf-note").textContent = parts.note;
+    card.querySelector("#wacc-val").textContent = (wacc * 100).toFixed(1) + "%";
+    const sl = card.querySelector("#wacc-slider"); if (Math.abs(+sl.value / 100 - wacc) > 1e-9) sl.value = (wacc * 100).toFixed(1);
+    card.querySelector('[data-action="wacc-reset"]').disabled = Math.abs(wacc - base) < 1e-9;
+  }
+
   function render(el, ctx) {
     const { s, h, latest, data, result, versions, hasTemplate, connected } = ctx;
     const up = latest && s.price ? latest.valuePerShare / s.price - 1 : null;
@@ -272,18 +333,7 @@
     if (data && result) {
       const P = data.periods, fc = P.map(p => p.status.toLowerCase() === "forecast");
       const yi = P.map((p, i) => i).filter(i => fc[i] && P[i].kind === "FY");
-      const labels = yi.map(i => P[i].label);
-      const steps = [
-        { label: "Cash flows\n2026–" + labels[labels.length - 1].slice(-2), value: result.sumPv },
-        { label: "Terminal\nvalue", value: result.pvTv },
-        { label: "Enterprise\nvalue", value: result.ev, total: true },
-        { label: "Net\ndebt", value: -result.netDebt },
-        { label: "Lease\nliabilities", value: -result.leases },
-        { label: "Earn-outs\n& options", value: -result.other },
-        { label: "Equity\nvalue", value: result.equity, total: true }
-      ];
-      html += `<section class="card cp-chart kc"><div class="kc-title"><h2>From cash flows to value</h2><span class="unit">SEK m</span></div>${waterfall(steps, h)}
-        <ul class="kc-notes"><li>Present values at your WACC of ${(data.inputs.wacc * 100).toFixed(1)}%</li><li>Equity value ${h.fmt(result.equity, 0)} / ${h.fmt(data.inputs.shares)} m shares = SEK ${h.fmt(result.vps)} per share</li></ul></section>`;
+      html += valuationCard(ctx);
 
       // key assumptions table
       const cols = P.map((p, i) => i).filter(i => fc[i]);
@@ -323,5 +373,5 @@
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { render };
+  window.MMCompany = { render, updateValuation };
 })();

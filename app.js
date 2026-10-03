@@ -334,7 +334,7 @@ $("gh-remove").onclick=()=>{gh.token="";try{localStorage.setItem(GH_KEY,JSON.str
    models/index.json lists every upload (newest first); each upload has the original .xlsx and a .json
    with what Mr. Market read. Blank transfer sheets live in templates/<TICKER>_transfer_sheet.xlsx */
 let MODEL_INDEX=[], TEMPLATES=new Set(); const MODEL_DATA={}, ACTUALS={};
-let chartMetric="sales";
+let chartMetric="sales"; const WACC_OVERRIDE={};
 const safeT=t=>t.replace(/\s+/g,"-");
 const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
 function latestModel(t){return MODEL_INDEX.find(m=>m.ticker===t)||null}
@@ -404,16 +404,27 @@ async function ensureModelData(t,path){
   try{const r=await getJson(path); if(r.data){MODEL_DATA[path]=r.data; if(currentCompany===t) renderCompany()}}catch(e){}
   finally{LOADING.delete(path)}
 }
+function companyCtx(){
+  const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
+  let result=null; try{result=data?MMModels.computeValuation(data):null}catch(e){}
+  return {s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
+    versions:MODEL_INDEX.filter(m=>m.ticker===t),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
+    wacc:lm?WACC_OVERRIDE[lm.json]:undefined,h:{fmt,pct,esc,fmtDate,flag,daysTo}};
+}
 function renderCompany(){
   if(!currentCompany) return;
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
   if(lm&&!data) ensureModelData(t,lm.json);
   ensureActuals(t);
-  let result=null; try{result=data?MMModels.computeValuation(data):null}catch(e){}
-  MMCompany.render($("view-company"),{s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
-    versions:MODEL_INDEX.filter(m=>m.ticker===t),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
-    h:{fmt,pct,esc,fmtDate,flag,daysTo}});
+  MMCompany.render($("view-company"),companyCtx());
 }
+// WACC slider: recalculates instantly while dragging; only the valuation card is redrawn
+$("view-company").addEventListener("input",e=>{
+  if(e.target.id!=="wacc-slider") return;
+  const lm=latestModel(currentCompany); if(!lm) return;
+  const w=Math.round(+e.target.value*10)/1000; WACC_OVERRIDE[lm.json]=w;
+  MMCompany.updateValuation($("view-company"),companyCtx(),w);
+});
 window.addEventListener("hashchange",route);
 
 /* ---------- upload: read, review, save ---------- */
@@ -428,6 +439,7 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
     else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_financials.xlsx`)}
     else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
+    else if(a==="wacc-reset"){const lm=latestModel(t);if(lm){delete WACC_OVERRIDE[lm.json];MMCompany.updateValuation($("view-company"),companyCtx(),MODEL_DATA[lm.json].inputs.wacc)}}
   }catch(err){toast(err.message)}
 });
 $("model-file").addEventListener("change",async()=>{
@@ -486,7 +498,7 @@ async function saveModel(){
    version.json in the repo always holds the latest version. If it differs from the code that is
    running, the page reloads itself with ?v=<new version>, which makes Safari fetch fresh files.
    Runs in the background, so it never slows the app down. */
-const APP_VERSION="0.13";
+const APP_VERSION="0.14";
 let lastCheck=0;
 async function checkForUpdate(){
   if(Date.now()-lastCheck<60000) return; lastCheck=Date.now();

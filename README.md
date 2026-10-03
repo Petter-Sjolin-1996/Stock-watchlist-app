@@ -30,3 +30,4 @@ Actuals annual). The app reads rows by their labels, not by cell addresses.
 Bump the number in four places: `version.json`, `APP_VERSION` in `app.js`, and the two `?v=` tags in `index.html`.
 - v0.10: company page (value, model card, charts, key assumptions, version history); upload a full DCF or transfer sheet, review checks, save to the data repo; download transfer sheet template, latest model and earlier versions.
 - v0.11: key chart on the company page (Revenue, EBITDA, EBIT, Net income, Free cash flow) with actual history from actuals/<TICKER>_actuals.xlsx and your forecast; CAGR arrows, margin and EPS pills; download historical data.
+- v0.12: chart redesign (fixed selector, legend top-right, notes bottom-left, no y-axis, grey actual area, thinner CAGR arrows, coloured pills), ROIC view, waterfall in the same style, Download historical data in the model card.

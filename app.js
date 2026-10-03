@@ -61,7 +61,7 @@ function info(t){
   const m=MARKET.stocks&&MARKET.stocks[t];
   Object.assign(s,{price:null,day:null,kpi:KPI_KEYS.map(()=>null),hist:HIST_KEYS.map(()=>null),report:s.value!=null?s.report:null});
   if(!m) return s;
-  s.price=m.price??null; s.day=m.day??null;
+  s.price=m.price??null; s.day=m.day??null; s.priceDate=m.date||MARKET.asOf||null;
   s.kpi=KPI_KEYS.map(k=>m.kpi&&m.kpi[k]!=null?m.kpi[k]:null);
   s.hist=HIST_KEYS.map(k=>m.hist&&m.hist[k]!=null?m.hist[k]:null);
   if(m.nextReport) s.report=m.nextReport;
@@ -131,7 +131,7 @@ const COLS={
  price:[nameCol,
   {key:"day",label:"Day change",val:s=>s.day==null||s.price==null?-Infinity:unit==="pct"?s.day:s.price-s.price/(1+s.day),
    cell:s=>{if(s.day==null||s.price==null)return dash;const a=s.price-s.price/(1+s.day);return `<span class="${s.day>=0?'pos':'neg'}">${unit==="pct"?pct(s.day,2):(a>0?"+":"")+fmt(a)}</span>`}},
-  {key:"price",label:"Last price",val:s=>s.price??-Infinity,cell:s=>s.price==null?dash:fmt(s.price)},
+  {key:"price",label:"Last price",val:s=>s.price??-Infinity,cell:s=>s.price==null?dash:`${fmt(s.price)}<br><small class="dim">${MARKET?(s.priceDate?"as of "+fmtDate(s.priceDate):""):"demo price"}</small>`},
   {key:"value",label:"Your value",cls:"col-val",val:s=>s.value??-Infinity,cell:s=>s.value!=null?fmt(s.value):dash},
   {key:"upside",label:"Upside",val:s=>up(s)??-Infinity,cell:s=>{const u=up(s);if(u==null)return dash;
     const w=Math.min(Math.abs(u),.5)/.5*50;

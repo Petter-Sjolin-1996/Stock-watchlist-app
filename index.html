@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,600;6..72,700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=0.7">
+<link rel="stylesheet" href="styles.css?v=0.8">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -20,6 +20,7 @@
   <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-sort" viewBox="0 0 10 10"><path d="M2 4l3-3 3 3M2 6l3 3 3-3" stroke="currentColor" stroke-width="1.3" fill="none"/></symbol>
   <symbol id="i-asc" viewBox="0 0 10 10"><path d="M2 6l3-3 3 3" stroke="currentColor" stroke-width="1.6" fill="none"/></symbol>
   <symbol id="i-desc" viewBox="0 0 10 10"><path d="M2 4l3 3 3-3" stroke="currentColor" stroke-width="1.6" fill="none"/></symbol>
@@ -64,6 +65,7 @@
         <button role="tab" data-tab="kpi" aria-selected="false">Key figures</button>
         <button role="tab" data-tab="hist" aria-selected="false">History</button>
       </div>
+      <button class="pill refresh" id="refresh-btn" title="Fetch the latest prices now"><svg><use href="#i-refresh"/></svg><span id="refresh-label">Refresh prices</span></button>
       <div id="unit-wrap"><span class="toggle-label">Day change in</span>
         <div class="seg" role="group" aria-label="Day change unit">
           <button id="u-pct" aria-pressed="true">%</button>
@@ -81,7 +83,7 @@
   </section>
   <button class="add" id="add-btn"><svg width="18" height="18"><use href="#i-plus"/></svg>Add company</button>
 
-  <p class="foot"><span id="data-status"></span><br>Version 0.7. Lists are saved in this browser until list sync is added.</p>
+  <p class="foot"><span id="data-status"></span><br>Version 0.8. Lists are saved in this browser until list sync is added.</p>
 </div>
 
 <div class="scrim" id="scrim"></div>
@@ -132,6 +134,6 @@
 
 <div class="toast" id="toast" role="status"><span id="toast-msg"></span><button id="toast-undo">Undo</button></div>
 
-<script src="app.js?v=0.7"></script>
+<script src="app.js?v=0.8"></script>
 </body>
 </html>

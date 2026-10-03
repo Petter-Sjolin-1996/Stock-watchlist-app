@@ -295,6 +295,40 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeAll();$("resul
 const setUnit=u=>{unit=u;$("u-pct").setAttribute("aria-pressed",u==="pct");$("u-sek").setAttribute("aria-pressed",u==="sek");renderTable()};
 $("u-pct").onclick=()=>setUnit("pct"); $("u-sek").onclick=()=>setUnit("sek");
 
+/* ---------- refresh prices: starts the workflow in the data repo, waits, reloads ---------- */
+const WORKFLOW="update-market-data.yml";
+let refreshing=false;
+const ghApi=(path,opt={})=>fetch(`https://api.github.com/repos/${encodeURIComponent(gh.owner)}/${encodeURIComponent(gh.repo)}${path}`,
+  Object.assign({cache:"no-store"},opt,{headers:Object.assign({Authorization:`Bearer ${gh.token}`,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"},opt.headers||{})}));
+function setRefresh(label,busy){const b=$("refresh-btn");b.disabled=busy;$("refresh-label").textContent=label;b.classList.toggle("busy",busy)}
+async function refreshPrices(){
+  if(refreshing) return;
+  if(!gh.token){openSettings();return}
+  refreshing=true; setRefresh("Updating…",true);
+  const started=Date.now();
+  try{
+    const r=await ghApi(`/actions/workflows/${WORKFLOW}/dispatches`,{method:"POST",body:JSON.stringify({ref:"main"}),headers:{"Content-Type":"application/json"}});
+    if(r.status===403||r.status===404) throw new Error("The token can't start the update. Give it 'Actions: Read and write' access in GitHub (see Settings).");
+    if(!r.ok) throw new Error(`GitHub returned error ${r.status} when starting the update.`);
+    toast("Update started. This takes about 1–2 minutes.");
+    let run=null;
+    for(let i=0;i<36;i++){ // poll up to ~6 minutes
+      await new Promise(res=>setTimeout(res,10000));
+      const rr=await ghApi(`/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=5`);
+      if(!rr.ok) continue;
+      const runs=(await rr.json()).workflow_runs||[];
+      run=runs.find(x=>new Date(x.created_at).getTime()>=started-60000);
+      if(run&&run.status==="completed") break;
+      setRefresh(run?"Fetching prices…":"Starting…",true);
+    }
+    if(!run||run.status!=="completed") throw new Error("The update is taking longer than usual. Check the Actions tab in the data repo.");
+    if(run.conclusion!=="success") throw new Error("The update failed. Open the Actions tab in the data repo to see why.");
+    await loadMarket(true);
+  }catch(e){toast(e.message)}
+  finally{refreshing=false;setRefresh("Refresh prices",false)}
+}
+$("refresh-btn").onclick=refreshPrices;
+
 /* ---------- settings: GitHub connection ---------- */
 function openSettings(){
   $("gh-owner").value=gh.owner; $("gh-repo").value=gh.repo; $("gh-token").value="";

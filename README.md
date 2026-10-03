@@ -28,3 +28,4 @@ Actuals annual). The app reads rows by their labels, not by cell addresses.
 
 ## Releasing a new version
 Bump the number in four places: `version.json`, `APP_VERSION` in `app.js`, and the two `?v=` tags in `index.html`.
+- v0.10: company page (value, model card, charts, key assumptions, version history); upload a full DCF or transfer sheet, review checks, save to the data repo; download transfer sheet template, latest model and earlier versions.

@@ -33,3 +33,5 @@ Bump the number in four places: `version.json`, `APP_VERSION` in `app.js`, and t
 - v0.12: chart redesign (fixed selector, legend top-right, notes bottom-left, no y-axis, grey actual area, thinner CAGR arrows, coloured pills), ROIC view, waterfall in the same style, Download historical data in the model card.
 - v0.13: labels of negative bars kept clear of the x-axis; CAGR n/a for negative start or end values; 'Download historical financials'.
 - v0.14: valuation card with value-per-share panel (share price, upside) and a WACC slider with reset to the model's WACC.
+- v0.15: 'Match share price' sets the WACC so your value equals today's share price (market-implied return); neutral label at 0.0% upside.
+- v0.16: button renamed to 'Implied return'.

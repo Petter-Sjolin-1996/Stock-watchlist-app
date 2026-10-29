@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.22";
+const APP_VERSION="0.23";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */

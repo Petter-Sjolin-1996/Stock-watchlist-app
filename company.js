@@ -318,6 +318,81 @@
   const errorBox = (h, title, msg) => `<div class="warn"><b>${h.esc(title)}</b> ${h.esc(msg)}</div>
     <div class="cp-actions" style="margin-top:10px"><button class="pill" data-action="retry-load">Try again</button></div>`;
 
+
+  /* ================= forecast vs actual ================= */
+  const GREEN = "#2E8B57", REDB = "#C8504A", GREYB = "#C9CED6";
+  function compareRows(data, A, Q) {
+    const i = data.periods.findIndex(p => p.label === Q && String(p.status).toLowerCase() === "forecast");
+    if (i < 0 || !A || !A.quarterly) return null;
+    const S = A.segments, v = (arr) => (arr && arr[i] != null ? arr[i] : 0);
+    const segAct = (sec, name) => (S ? S.seg(sec, name, Q) : null);
+    const sales = [], ebitda = [], margin = [];
+    data.sales.forEach(sg => {
+      const e = data.ebitda.find(x => x.name === sg.name);
+      const fs = sg.values[i], as = segAct("net sales by business area", sg.name);
+      const fe = e ? e.values[i] : null, ae = segAct("adjusted ebitda by business area", sg.name);
+      sales.push({ name: sg.name, f: fs, a: as });
+      ebitda.push({ name: sg.name, f: fe, a: ae });
+      margin.push({ name: sg.name, f: fs && fe != null ? fe / fs : null, a: as && ae != null ? ae / as : null, pp: true });
+    });
+    const fS = data.sales.reduce((s2, x) => s2 + v(x.values), 0) - v(data.lines.elim);
+    const fE = data.ebitda.reduce((s2, x) => s2 + v(x.values), 0) - v(data.lines.central);
+    const aS = A.quarterly.value("net sales", Q), aE = A.quarterly.value("adjusted ebitda", Q);
+    sales.push({ name: "Group", f: fS, a: aS, total: true });
+    ebitda.push({ name: "Group", f: fE, a: aE, total: true });
+    margin.push({ name: "Group", f: fS ? fE / fS : null, a: aS && aE != null ? aE / aS : null, pp: true, total: true });
+    const dev = r => r.f == null || r.a == null ? null : r.pp ? (r.a - r.f) * 100 : r.f ? r.a / r.f - 1 : null;
+    [sales, ebitda, margin].forEach(g => g.forEach(r => { r.d = dev(r); }));
+    return { sales, ebitda, margin };
+  }
+  function fvaBlock(title, rows, h) {
+    const pp = rows[0] && rows[0].pp, band = pp ? 0.5 : 0.02;
+    const vals = rows.map(r => r.d).filter(x => x != null);
+    if (!vals.length) return "";
+    const max = Math.max(band * 2.5, ...vals.map(Math.abs)) * 1.05;
+    const w = x => Math.min(50, Math.abs(x) / max * 50);
+    const lbl = x => { const v = pp ? Math.abs(x) : Math.abs(x * 100), t = v.toFixed(1), sign = t === "0.0" ? "" : x >= 0 ? "+" : "−"; return pp ? `${sign}${t} pp` : `${sign}${t}%`; };
+    const num = (x) => x == null ? "–" : pp ? (x * 100).toFixed(1) + "%" : h.fmt(x, 0);
+    return `<div class="fva-block"><div class="fva-title">${h.esc(title)}</div>` + rows.map(r => {
+      if (r.d == null) return `<div class="fva-row${r.total ? " total" : ""}"><span class="fva-lab">${h.esc(r.name)}</span><span class="fva-track"><span class="fva-zero"></span></span><span class="fva-val dim">–</span><span class="fva-num">${num(r.f)} → ${num(r.a)}</span></div>`;
+      const inLine = Math.abs(r.d) <= band, col = inLine ? GREYB : r.d > 0 ? GREEN : REDB;
+      const bar = r.d >= 0 ? `left:50%;width:${w(r.d)}%` : `right:50%;width:${w(r.d)}%`;
+      return `<div class="fva-row${r.total ? " total" : ""}" title="${h.esc(r.name)}: forecast ${num(r.f)}, actual ${num(r.a)}">
+        <span class="fva-lab">${h.esc(r.name)}</span>
+        <span class="fva-track"><span class="fva-band" style="left:${50 - w(band)}%;width:${2 * w(band)}%"></span><span class="fva-zero"></span><span class="fva-bar" style="${bar};background:${col}"></span></span>
+        <span class="fva-val" style="color:${inLine ? "var(--muted)" : col}">${lbl(r.d)}</span>
+        <span class="fva-num">${num(r.f)} → ${num(r.a)}</span></div>`;
+    }).join("") + `</div>`;
+  }
+  function compareCard(ctx) {
+    const { h } = ctx, c = ctx.comparison;
+    if (!c) return "";
+    if (!c.list.length) return `<section class="card cp-chart kc"><div class="kc-title"><h2>Forecast vs actual</h2></div><p class="dim">Appears here after the next report, comparing your forecast with what the company reports</p></section>`;
+    const sel = c.list.find(x => x.quarter === c.selected) || c.list[0];
+    const chips = c.list.map(x => `<button data-action="fva-q" data-q="${h.esc(x.quarter)}" aria-pressed="${x.quarter === sel.quarter}">${h.esc(x.quarter)}</button>`).join("");
+    const legend = `<span><i class="band"></i>In line (±2%, ±0.5 pp)</span><span><i style="background:${GREEN}"></i>Above your forecast</span><span><i style="background:${REDB}"></i>Below</span>`;
+    let body;
+    if (!c.data) body = `<p class="dim">Loading your forecast…</p>`;
+    else {
+      const rows = compareRows(c.data, ctx.actuals, sel.quarter);
+      if (!rows) body = `<p class="dim">No forecast for ${h.esc(sel.quarter)} in that model version</p>`;
+      else {
+        const gs = rows.sales.find(r => r.total), ge = rows.ebitda.find(r => r.total);
+        const word = r => r.d == null ? "–" : Math.abs(r.d) <= 0.02 ? "in line" : `${r.d > 0 ? "+" : "−"}${Math.abs(r.d * 100).toFixed(0)}%`;
+        body = `<p class="fva-head">${h.esc(sel.quarter)}: sales ${word(gs)}, adjusted EBITDA ${word(ge)} vs your forecast</p>
+          <div class="fva-cols"><span></span><span class="fva-axis"><span>Below forecast</span><span>Above forecast</span></span><span></span><span class="fva-num-h">Forecast → actual</span></div>
+          ${fvaBlock("Net sales", rows.sales, h)}${fvaBlock("Adjusted EBITDA", rows.ebitda, h)}${fvaBlock("EBITDA margin", rows.margin, h)}`;
+      }
+    }
+    const v = sel.version, up = v.uploadedAt ? h.fmtDate(v.uploadedAt.slice(0, 10)) : "–";
+    return `<section class="card cp-chart kc" id="fva">
+      <div class="kc-title"><h2>Forecast vs actual</h2><span class="unit">SEK m</span></div>
+      <div class="kc-bar"><div class="seg kc-tabs" role="group" aria-label="Quarter">${chips}</div><div class="legend kc-legend">${legend}</div></div>
+      ${body}
+      <ul class="kc-notes"><li>Your forecast: model uploaded ${up}, based on ${h.esc(v.basis || "–")}</li><li>Actual: as reported${sel.reportDate ? " on " + h.fmtDate(sel.reportDate) : ""}, adjusted EBITDA excluding one-offs</li></ul>
+    </section>`;
+  }
+
   function render(el, ctx) {
     const { s, h, latest, data, result, versions, hasTemplate, connected } = ctx;
     const st = ctx.status || {};
@@ -407,6 +482,7 @@
     }
 
     // ---- version history
+    if (latest) html += safe("Forecast vs actual", h, () => compareCard(ctx));
     html += safe("Version history", h, () => { let html = ""; if (versions.length) {
       html += `<section class="card cp-chart"><h2>Version history</h2><p class="sub">Every upload is kept, so you can follow how your view has changed.</p>
       <div class="tbl-scroll"><table class="versions"><thead><tr><th>Uploaded</th><th>Based on</th><th>Value per share</th><th>Change</th><th>File</th><th></th></tr></thead><tbody>
@@ -420,5 +496,5 @@
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.21", render, updateValuation, impliedWacc };
+  window.MMCompany = { VERSION: "0.22", render, updateValuation, impliedWacc };
 })();

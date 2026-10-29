@@ -41,3 +41,5 @@ Bump the number in four places: `version.json`, `APP_VERSION` in `app.js`, and t
 ## Releasing
 Upload all changed files in one commit (Add file → Upload files), so GitHub Pages deploys them together. Bump the version in version.json, APP_VERSION in app.js, VERSION in models.js and company.js, --mm-version in styles.css and the ?v= tags in index.html.
 - v0.19: larger, vertically centred Mr. Market logo that links to the start page.
+- v0.20: My models page (one row per company, status chips, Needs update filter, version history with notes, hide/show versions); new upload dialog (drop or browse, company read from the file with confirmation and Change); template 1.1 ticker cell.
+- v0.21: report detection: last and next report dates (reports.json first, then Yahoo), 'Reported' in the watchlist for a week, amber 'Q3 reported · not reviewed' model status, banner on the company page.

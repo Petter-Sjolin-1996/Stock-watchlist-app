@@ -43,3 +43,4 @@ Upload all changed files in one commit (Add file → Upload files), so GitHub Pa
 - v0.19: larger, vertically centred Mr. Market logo that links to the start page.
 - v0.20: My models page (one row per company, status chips, Needs update filter, version history with notes, hide/show versions); new upload dialog (drop or browse, company read from the file with confirmation and Change); template 1.1 ticker cell.
 - v0.21: report detection: last and next report dates (reports.json first, then Yahoo), 'Reported' in the watchlist for a week, amber 'Q3 reported · not reviewed' model status, banner on the company page.
+- v0.22: Forecast vs actual card: per reported quarter, your last model before the report vs actuals (sales, adjusted EBITDA, margin by business area and group), quarter chips.

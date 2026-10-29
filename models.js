@@ -282,7 +282,7 @@
   async function readActuals(buf) {
     const wb = await readWorkbook(buf);
     const out = {};
-    for (const name of ["Annual", "Quarterly"]) {
+    for (const name of ["Annual", "Quarterly", "Segments"]) {
       const ws = await wb.sheet(name);
       if (!ws) continue;
       let hdr = 0;
@@ -295,10 +295,15 @@
         periods.push(String(v).trim());
       }
       const rows = {};
+      let section = "";
       for (let r = hdr + 1; r <= ws.maxRow; r++) {
-        const lab = norm(ws.cell("B", r).v);
-        if (!lab || rows[lab]) continue;
-        rows[lab] = periods.map((_, i) => num(ws.cell(4 + i, r).v));
+        const raw = ws.cell("B", r).v, lab = norm(raw);
+        if (!lab) continue;
+        // section headers: upper-case text without a unit (e.g. "NET SALES BY BUSINESS AREA")
+        if (ws.cell("C", r).v == null && String(raw) === String(raw).toUpperCase()) { section = lab; continue; }
+        const key = name === "Segments" ? section + "|" + lab : lab;
+        if (rows[key]) continue;
+        rows[key] = periods.map((_, i) => num(ws.cell(4 + i, r).v));
       }
       out[name.toLowerCase()] = {
         periods,
@@ -307,11 +312,18 @@
           const k = keys.find(x => x === n) || keys.find(x => x.startsWith(n));
           return k ? rows[k] : periods.map(() => null);
         },
-        value(label, period) { const i = periods.indexOf(period); return i < 0 ? null : this.get(label)[i]; }
+        value(label, period) { const i = periods.indexOf(period); return i < 0 ? null : this.get(label)[i]; },
+        // Segments: value("net sales by business area", "Fiber Solutions", "Q3 2026")
+        seg(section, label, period) {
+          const i = periods.indexOf(period); if (i < 0) return null;
+          const sec = norm(section), lab = norm(label);
+          const k = Object.keys(rows).find(x => x.startsWith(sec) && x.endsWith("|" + lab));
+          return k ? rows[k][i] : null;
+        }
       };
     }
     return out;
   }
 
-  window.MMModels = { VERSION: "0.21", readWorkbook, parseTransferSheet, computeValuation, readActuals };
+  window.MMModels = { VERSION: "0.22", readWorkbook, parseTransferSheet, computeValuation, readActuals };
 })();

@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.19";
+const APP_VERSION="0.21";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */
@@ -91,21 +91,41 @@ let marketError="";
 const KPI_KEYS=["mcap","dy","vol","beta","pe","ps","pb","roe"], HIST_KEYS=["1d","1w","1m","3m","6m","ytd","1y","3y","5y"];
 function info(t){
   const s=demoInfo(t); if(!s) return null;
-  if(!MARKET) return withModel(s);
+  if(!MARKET) return withModel(withReports(s,null));
   const m=MARKET.stocks&&MARKET.stocks[t];
   Object.assign(s,{price:null,day:null,kpi:KPI_KEYS.map(()=>null),hist:HIST_KEYS.map(()=>null),report:s.value!=null?s.report:null});
-  if(!m) return withModel(s);
+  if(!m) return withModel(withReports(s,null));
   s.price=m.price??null; s.day=m.day??null; s.priceDate=m.date||MARKET.asOf||null;
   s.kpi=KPI_KEYS.map(k=>m.kpi&&m.kpi[k]!=null?m.kpi[k]:null);
   s.hist=HIST_KEYS.map(k=>m.hist&&m.hist[k]!=null?m.hist[k]:null);
-  if(m.nextReport) s.report=m.nextReport;
-  return withModel(s);
+  return withModel(withReports(s,m));
 }
+/* ---------- report dates ----------
+   reports.json in the data repo (maintained from the companies' financial calendars) comes first;
+   Yahoo's last/next earnings dates are the fallback. */
+let REPORT_CAL={};
+const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const qIndex=lab=>{const m=/^Q([1-4])\s+(\d{4})$/.exec(String(lab||"").trim());return m?(+m[2])*4+(+m[1]):null};
+function quarterBefore(iso){const d=dateOf(iso),q=Math.floor(d.getMonth()/3);return q===0?`Q4 ${d.getFullYear()-1}`:`Q${q} ${d.getFullYear()}`}
+function withReports(s,m){
+  const today=isoDay(TODAY), list=(REPORT_CAL[s.ticker]||[]).filter(e=>e&&e.date).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  let last=null,next=null;
+  list.forEach(e=>{if(e.date<=today)last=e;else if(!next)next=e});
+  if(!last&&m&&m.lastReport&&m.lastReport<=today) last={date:m.lastReport};
+  if(!next&&m&&m.nextReport&&m.nextReport>today) next={date:m.nextReport};
+  if(last&&!last.quarter) last=Object.assign({},last,{quarter:quarterBefore(last.date)});
+  if(next&&!next.quarter) next=Object.assign({},next,{quarter:quarterBefore(next.date)});
+  if(list.length||m){s.report=next?next.date:null}
+  s.lastReport=last; s.nextReportInfo=next;
+  return s;
+}
+const daysSince=iso=>Math.round((TODAY-dateOf(iso))/864e5);
 function withModel(s){
   if(!gh.token) return s;
   if(DS.models!=="ok"){s.value=null;s.model=DS.models==="error"?"Not loaded":"Loading…";return s}
   const lm=latestModel(s.ticker);
   s.value=lm?lm.valuePerShare:null; s.model=lm?`Based on ${lm.basis}`:null;
+  s.modelStatus=lm?modelStatus(lm,s):null;
   return s;
 }
 async function loadMarket(showToast){
@@ -179,8 +199,10 @@ const COLS={
     const w=Math.min(Math.abs(u),.5)/.5*50;
     return `<span class="up-cell"><b class="${u>=0?'pos':'neg'}" style="font-weight:600">${pct(u)}</b><span class="gap-bar" aria-hidden="true"><span style="${u>=0?`left:50%;width:${w}%`:`right:50%;width:${w}%`};background:${u>=0?'var(--up)':'var(--down)'}"></span></span></span>`}},
   {key:"report",label:"Next report",cls:"col-report",val:s=>s.report||"9999",asc:true,
-   cell:s=>{if(!s.report)return dash;const d=daysTo(s.report);if(d<0)return `<span class="dim">${fmtDate(s.report)}</span>`;return `<span class="${d<=30?'soon':''}">${fmtDate(s.report)}</span><br><small class="dim">in ${d} days</small>`}},
-  {key:"model",label:"Model",cls:"col-model",left:true,nosort:true,cell:s=>`<span class="status ${s.value!=null?'ok':'none'}">${s.model||'No model yet'}</span>`},
+   cell:s=>{const lr=s.lastReport;
+     if(lr&&daysSince(lr.date)<=7) return `<span class="reported">Reported ${fmtDate(lr.date)}</span><br><small class="dim">${esc(lr.quarter)}</small>`;
+     if(!s.report)return dash;const d=daysTo(s.report);if(d<0)return `<span class="dim">${fmtDate(s.report)}</span>`;return `<span class="${d<=30?'soon':''}">${fmtDate(s.report)}</span><br><small class="dim">in ${d} days</small>`}},
+  {key:"model",label:"Model",cls:"col-model",left:true,nosort:true,cell:s=>s.modelStatus&&s.modelStatus.kind==="update"?`<span class="status upd" title="${esc(s.modelStatus.text)}">${esc(s.modelStatus.short)}</span>`:`<span class="status ${s.value!=null?'ok':'none'}">${s.model||'No model yet'}</span>`},
   toolsCol],
  kpi:[nameCol,
   ...[["mcap","Market cap",v=>fmt(v,0)+" MSEK",false],["dy","Dividend yield",v=>fmt(v*100)+"%",true],["vol","Volatility",v=>fmt(v*100)+"%",true],
@@ -379,7 +401,8 @@ const netErr=e=>e&&e.name==="TypeError"?"No connection to GitHub. Check your int
 let chartMetric="sales"; const WACC_OVERRIDE={};
 const safeT=t=>t.replace(/\s+/g,"-");
 const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
-function latestModel(t){return MODEL_INDEX.find(m=>m.ticker===t)||null}
+function latestModel(t){return MODEL_INDEX.find(m=>m.ticker===t&&!m.hidden)||null}
+const LATEST_TEMPLATE="1.1";
 async function loadModels(){
   if(!gh.token){MODEL_INDEX=[];TEMPLATES=new Set();DS.models="idle";renderAll();return}
   DS.models="loading"; DS.modelsErr=""; renderAll();
@@ -396,6 +419,10 @@ async function loadModels(){
     }
     DS.models="ok";
   }catch(e){DS.models="error";DS.modelsErr=netErr(e);console.error("loadModels",e)}
+  try{
+    const r=await ghApi("/contents/reports.json",{headers:{Accept:"application/vnd.github.raw+json"}});
+    if(r.ok){const d=JSON.parse(await r.text());REPORT_CAL=(d&&d.companies)||{}} else if(r.status===404) REPORT_CAL={};
+  }catch(e){console.error("reports",e)}
   try{
     const r=await ghApi("/contents/templates");
     if(r.status===404){TEMPLATES=new Set()}
@@ -430,10 +457,15 @@ async function downloadPath(path,name){
 
 /* ---------- routing: #/c/<ticker> shows the company page ---------- */
 let currentCompany=null;
+let currentView="watchlist";
+function setNav(view){
+  document.querySelectorAll(".nav a[data-view]").forEach(a=>{if(a.dataset.view===view)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current")});
+}
 function route(){
   const m=/^#\/c\/(.+)$/.exec(location.hash);
-  if(m&&info(decodeURIComponent(m[1]))){showCompany(decodeURIComponent(m[1]))}
-  else{currentCompany=null;$("view-company").hidden=true;$("view-watchlist").hidden=false}
+  if(m&&info(decodeURIComponent(m[1]))){currentView="company";$("view-models").hidden=true;setNav("watchlist");showCompany(decodeURIComponent(m[1]))}
+  else if(location.hash==="#/models"){currentView="models";currentCompany=null;$("view-company").hidden=true;$("view-watchlist").hidden=true;$("view-models").hidden=false;setNav("models");renderModelsPage();window.scrollTo(0,0)}
+  else{currentView="watchlist";currentCompany=null;$("view-company").hidden=true;$("view-models").hidden=true;$("view-watchlist").hidden=false;setNav("watchlist")}
 }
 function showCompany(t){
   const first=currentCompany!==t; currentCompany=t;
@@ -480,7 +512,7 @@ function companyCtx(){
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
   let result=null; try{result=data?MMModels.computeValuation(data):null}catch(e){}
   return {s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
-    versions:MODEL_INDEX.filter(m=>m.ticker===t),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
+    versions:MODEL_INDEX.filter(m=>m.ticker===t&&!m.hidden),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
     wacc:lm?WACC_OVERRIDE[lm.json]:undefined,h:{fmt,pct,esc,fmtDate,flag,daysTo},
     status:{models:DS.models,modelsErr:DS.modelsErr,actualsErr:ACT_ERR[t]||"",modelDataErr:lm?MODEL_ERR[lm.json]||"":""}};
 }
@@ -504,7 +536,7 @@ $("view-company").addEventListener("input",e=>{
   MMCompany.updateValuation($("view-company"),companyCtx(),w);
 });
 window.addEventListener("hashchange",route);
-document.querySelector(".brand-link").addEventListener("click",()=>{if(location.hash==="#/"||location.hash===""){route();window.scrollTo(0,0)}});
+{const bl=document.querySelector(".brand-link"); if(bl) bl.addEventListener("click",()=>{if(location.hash==="#/"||location.hash===""){route();window.scrollTo(0,0)}});}
 
 /* ---------- upload: read, review, save ---------- */
 let pending=null;
@@ -512,7 +544,7 @@ $("view-company").addEventListener("click",async e=>{
   const b=e.target.closest("[data-action]"); if(!b) return;
   const t=currentCompany, a=b.dataset.action;
   try{
-    if(a==="upload"){$("model-file").value="";$("model-file").click()}
+    if(a==="upload"){openUpload(t)}
     else if(a==="download-template"){toast("Downloading…");await downloadPath(`templates/${safeT(t)}_transfer_sheet.xlsx`,`${safeT(t)}_transfer_sheet.xlsx`)}
     else if(a==="download-model"){const lm=latestModel(t);toast("Downloading…");await downloadPath(lm.xlsx,lm.fileName)}
     else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
@@ -524,38 +556,106 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="wacc-reset"){const lm=latestModel(t);if(lm){delete WACC_OVERRIDE[lm.json];MMCompany.updateValuation($("view-company"),companyCtx(),MODEL_DATA[lm.json].inputs.wacc)}}
   }catch(err){toast(err.message)}
 });
-$("model-file").addEventListener("change",async()=>{
-  const file=$("model-file").files[0]; if(!file||!currentCompany) return;
-  const t=currentCompany, name=info(t).name;
-  openDlg("dlg-review"); $("review-body").innerHTML=`<p class="dim">Reading ${esc(file.name)}…</p>`;
+/* ---------- upload: choose file, confirm company, review, save ----------
+   The company is read from inside the file (ticker cell, then the sheet title), never from the file name alone. */
+function openUpload(expected){
+  pending={expected:expected||null,file:null,buf:null,res:null,t:null,detected:null,choosing:false,note:""};
+  $("dr-t").textContent="Upload model";
+  openDlg("dlg-review"); renderPick();
+}
+function renderPick(){
+  $("review-body").innerHTML=`<label class="dropzone" id="dropzone">
+      <svg class="xl"><use href="#i-xl"/></svg>
+      <b>Drop your Excel file here</b><span class="dim small">or</span>
+      <span class="pill">Browse files</span>
+      <span class="dim small">Your DCF with the transfer sheet, or the transfer sheet alone (.xlsx)</span>
+    </label>`;
+  const dz=$("dropzone");
+  dz.onclick=e=>{e.preventDefault();$("model-file").value="";$("model-file").click()};
+  ["dragenter","dragover"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("over")}));
+  ["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove("over")}));
+  dz.addEventListener("drop",e=>{const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)handleFile(f)});
+}
+$("model-file").addEventListener("change",()=>{const f=$("model-file").files[0]; if(f&&pending) handleFile(f)});
+const normT=x=>String(x||"").toUpperCase().replace(/[-_]+/g," ").replace(/\s+/g," ").trim();
+function resolveTicker(raw,fileName){
+  const all=UNIVERSE.map(([t])=>t);
+  if(raw){const n=normT(raw);const hit=all.find(t=>normT(t)===n);if(hit)return hit}
+  const fn=String(fileName||"").toLowerCase();               // last resort: company name or ticker in the file name
+  const hit=UNIVERSE.find(([t,n])=>fn.includes(n.toLowerCase())||fn.includes(t.toLowerCase().replace(/\s+/g,"-"))||fn.includes(t.toLowerCase().replace(/\s+/g,"_")));
+  return hit?hit[0]:null;
+}
+async function handleFile(file){
+  $("review-body").innerHTML=`<p class="dim">Reading ${esc(file.name)}…</p>`;
   try{
     const buf=await file.arrayBuffer();
-    const res=await MMModels.parseTransferSheet(buf,t);
-    pending={t,file,buf,res}; renderReview();
+    const res=await MMModels.parseTransferSheet(buf,null);
+    const detected=resolveTicker(res.model&&res.model.ticker,file.name);
+    Object.assign(pending,{file,buf,res,detected,t:detected||pending.expected,choosing:!(detected||pending.expected)});
+    if(pending.t) ensureActuals(pending.t);
+    renderReview();
   }catch(err){$("review-body").innerHTML=`<div class="warn"><b>Could not read the file.</b> ${esc(err.message||String(err))}</div>
-    <div class="actions"><button class="pill" data-close>Close</button></div>`}
-});
+    <div class="actions"><button class="pill" id="rv-again">Choose another file</button><button class="pill" data-close>Close</button></div>`;
+    $("rv-again").onclick=renderPick}
+}
+// plausibility: does the share count in the sheet fit the chosen company?
+function shareCheck(t,res){
+  const sh=res.model&&res.model.inputs&&res.model.inputs.shares; if(!sh) return null;
+  let ref=null; const A=ACTUALS[t];
+  if(A&&A.quarterly){const v=A.quarterly.get("shares outstanding").filter(x=>x!=null);if(v.length)ref=v[v.length-1]}
+  if(ref==null&&MARKET&&MARKET.stocks&&MARKET.stocks[t]){const m=MARKET.stocks[t];if(m.kpi&&m.kpi.mcap&&m.price)ref=m.kpi.mcap/m.price}
+  if(!ref) return null;
+  return Math.abs(sh/ref-1)>0.2?`The sheet has ${fmt(sh)} m shares, but ${info(t).name} has about ${fmt(ref)} m. Is this the right company?`:null;
+}
 function renderReview(){
-  const {t,file,res}=pending, s=info(t), prev=latestModel(t), r=res.result;
-  const ok=[], bad=res.errors, warn=res.warnings;
+  const P=pending, {file,res}=P, r=res.result, t=P.t, s=t?info(t):null, prev=t?latestModel(t):null;
+  const bad=[...res.errors], warn=[...res.warnings], ok=[];
+  if(t){
+    if(P.detected&&P.detected!==t) warn.unshift(`The transfer sheet says ${P.detected}, but you are saving it for ${t}.`);
+    const sc=shareCheck(t,res); if(sc) warn.unshift(sc);
+  }
   if(!bad.length){
     ok.push("Transfer sheet found and all forecast cells are filled");
     if(res.model.sheet&&res.model.sheet.vps!=null&&!warn.some(w=>w.startsWith("The sheet's own value"))) ok.push(`Value per share matches the sheet (${fmt(res.model.sheet.vps)})`);
   }
-  const up=r&&s.price?r.vps/s.price-1:null;
-  let h=`<p class="rv-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${esc(file.name)}</b><br><span class="dim small">${esc(res.model&&res.model.company||"")}${res.model&&res.model.basis?" · based on "+esc(res.model.basis):""}${res.model&&res.model.templateVersion?" · template "+esc(res.model.templateVersion):""}</span></span></p>`;
-  if(r) h+=`<div class="rv-stats"><div><small>Your value</small><b>${fmt(r.vps)}</b></div><div><small>Share price</small><b>${s.price!=null?fmt(s.price):"–"}</b></div>
-    <div><small>Upside</small><b class="${up==null?"":up>=0?"pos":"neg"}">${up==null?"–":pct(up)}</b></div>
-    <div><small>vs last version</small><b>${prev?`<span class="${r.vps>=prev.valuePerShare?"pos":"neg"}">${pct(r.vps/prev.valuePerShare-1)}</span>`:"<span class='dim'>first</span>"}</b></div></div>`;
+  let h=`<p class="rv-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${esc(file.name)}</b><br><span class="dim small">${res.model&&res.model.basis?"Based on "+esc(res.model.basis):""}${res.model&&res.model.templateVersion?" · template "+esc(res.model.templateVersion):""}</span></span></p>`;
+  // company confirmation, with a simple way to change it
+  if(t&&!P.choosing){
+    h+=`<div class="rv-company">${flag(s.country)}<span>${prev?"Updated model for":"New model for"} <b>${esc(s.name)}</b> (${esc(t)})</span>
+      <button class="link-btn" id="rv-change">Not the right company? Change</button></div>`;
+  }else{
+    h+=`<div class="rv-choose"><b>${t?"Choose the company for this model":"Which company is this model for?"}</b>
+      <input class="field" id="rv-search" type="search" placeholder="Search company or ticker" autocomplete="off">
+      <div id="rv-results" class="rv-results"></div></div>`;
+  }
+  if(r&&t){
+    const up=s.price?r.vps/s.price-1:null;
+    h+=`<div class="rv-stats"><div><small>Your value</small><b>${fmt(r.vps)}</b></div><div><small>Share price</small><b>${s.price!=null?fmt(s.price):"–"}</b></div>
+      <div><small>Upside</small><b class="${up==null?"":up>=0?"pos":"neg"}">${up==null?"–":pct(up)}</b></div>
+      <div><small>vs last version</small><b>${prev&&prev.valuePerShare?`<span class="${r.vps>=prev.valuePerShare?"pos":"neg"}">${pct(r.vps/prev.valuePerShare-1)}</span>`:"<span class='dim'>first</span>"}</b></div></div>`;
+  }
   h+=`<ul class="checks">${bad.map(x=>`<li class="bad">${esc(x)}</li>`).join("")}${warn.map(x=>`<li class="warn-i">${esc(x)}</li>`).join("")}${ok.map(x=>`<li class="good">${esc(x)}</li>`).join("")}</ul>`;
-  const canSave=!bad.length&&!!gh.token;
+  h+=`<label for="rv-note" class="rv-note-label">Note <span class="dim">(optional): what changed in this version?</span></label>
+    <input class="field" id="rv-note" maxlength="200" placeholder="E.g. raised Data Center growth after the Q2 call" value="${esc(P.note)}">`;
+  const canSave=!bad.length&&!!gh.token&&!!t&&!P.choosing;
   h+=`${!gh.token?`<p class="note">Connect GitHub under Settings to save models.</p>`:""}
-    <div class="actions"><button class="pill" data-close>Cancel</button><button class="pill primary" id="rv-save" ${canSave?"":"disabled"}>Save model</button></div>`;
+    <div class="actions"><button class="pill" id="rv-other">Choose another file</button><button class="pill" data-close>Cancel</button><button class="pill primary" id="rv-save" ${canSave?"":"disabled"}>Save model</button></div>`;
   $("review-body").innerHTML=h;
+  $("rv-note").oninput=e=>{P.note=e.target.value};
+  $("rv-other").onclick=()=>{P.note=$("rv-note").value;renderPick()};
+  const ch=$("rv-change"); if(ch) ch.onclick=()=>{P.choosing=true;renderReview();$("rv-search").focus()};
+  const se=$("rv-search");
+  if(se){
+    const list=()=>{const q=se.value.trim().toLowerCase();
+      const hits=UNIVERSE.filter(([tt,n])=>!q||(n+" "+tt).toLowerCase().includes(q)).slice(0,8);
+      $("rv-results").innerHTML=hits.map(([tt,n])=>`<button class="rv-hit" data-co="${esc(tt)}">${flag(info(tt).country)}<span><b>${esc(n)}</b> <span class="dim">${esc(tt)}</span></span></button>`).join("")||`<p class="dim small">No match</p>`;};
+    se.oninput=list; list();
+    $("rv-results").onclick=e=>{const b=e.target.closest("[data-co]");if(!b)return;P.t=b.dataset.co;P.choosing=false;ensureActuals(P.t);renderReview()};
+  }
   const btn=$("rv-save"); if(btn) btn.onclick=saveModel;
 }
 async function saveModel(){
-  const {t,file,buf,res}=pending, btn=$("rv-save");
+  const P=pending, {t,file,buf,res}=P, btn=$("rv-save");
   btn.disabled=true; btn.textContent="Saving…";
   try{
     const now=new Date(), stamp=now.toISOString().replace(/[-:]/g,"").slice(0,15);
@@ -567,15 +667,125 @@ async function saveModel(){
     await putFile(jsonPath,b64text(JSON.stringify(data)),msg);
     const idx=await getJson("models/index.json");
     const list=(idx.data&&idx.data.models)||[];
+    const s=info(t), note=String(P.note||"").trim();
     const entry={ticker:t,uploadedAt:now.toISOString(),basis:res.model.basis,valuePerShare:+res.result.vps.toFixed(4),
-      fileName:file.name,xlsx:xlsxPath,json:jsonPath,templateVersion:res.model.templateVersion||null};
+      fileName:file.name,xlsx:xlsxPath,json:jsonPath,templateVersion:res.model.templateVersion||null,
+      note:note||null,priceAtUpload:s&&s.price!=null?s.price:null,priceDate:s&&s.priceDate||null};
     list.unshift(entry);
     await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
     MODEL_INDEX=list.sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt))); MODEL_DATA[jsonPath]=data; DS.models="ok";
-    closeAll(); toast(`Model saved: ${fmt(entry.valuePerShare)} per share`);
+    closeAll(); toast(`Model saved for ${s.name}: ${fmt(entry.valuePerShare)} per share`);
     try{renderAll()}catch(e){console.error(e)}
   }catch(err){btn.disabled=false;btn.textContent="Save model";toast(err.message)}
 }
+
+/* ---------- index updates: notes and hidden versions (a few bytes in models/index.json) ---------- */
+async function updateIndexEntry(jsonPath,patch,message){
+  const idx=await getJson("models/index.json");
+  const list=(idx.data&&idx.data.models)||[];
+  const e=list.find(m=>m.json===jsonPath); if(!e) throw new Error("This version was not found in your model list.");
+  Object.assign(e,patch);
+  await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),message,idx.sha);
+  const local=MODEL_INDEX.find(m=>m.json===jsonPath); if(local) Object.assign(local,patch);
+  renderAll();
+}
+
+/* ---------- My models page ---------- */
+const MM={filter:"all",open:new Set(),showHidden:new Set(),editing:null};
+function modelStatus(entry,s){
+  const bq=qIndex(entry.basis);
+  if(bq==null) return {kind:"unknown",text:"Status unknown",short:"Status unknown"};
+  const lr=s&&s.lastReport, nr=s&&s.nextReportInfo;
+  if(lr&&qIndex(lr.quarter)>bq){
+    if(entry.reviewedQuarter===lr.quarter) return {kind:"ok",text:`${lr.quarter} reviewed · assumptions kept`,short:`Reviewed ${lr.quarter}`};
+    return {kind:"update",text:`${lr.quarter} reported ${fmtDate(lr.date)} · your model is based on ${entry.basis}`,short:`${lr.quarter.split(" ")[0]} reported · not reviewed`};
+  }
+  if(nr){const n=daysTo(nr.date);return {kind:"ok",text:`Up to date · ${nr.quarter} report in ${n} day${n===1?"":"s"}`,short:`Based on ${entry.basis}`}}
+  // no report dates known: estimate from the calendar (reports come within ~2 months of quarter end)
+  const q=((bq-1)%4)+1, y=Math.floor((bq-1)/4), nq=q===4?1:q+1, ny=q===4?y+1:y;
+  if(TODAY>new Date(new Date(ny,nq*3,0).getTime()+60*864e5)) return {kind:"update",text:`A new report is likely out · your model is based on ${entry.basis}`,short:"New report likely out"};
+  return {kind:"ok",text:"Up to date",short:`Based on ${entry.basis}`};
+}
+function renderModelsPage(){
+  if(currentView!=="models") return;
+  const el=$("view-models");
+  try{
+    const groups={};
+    MODEL_INDEX.forEach(m=>{(groups[m.ticker]=groups[m.ticker]||[]).push(m)});
+    const rows=Object.keys(groups).map(t=>{const all=groups[t],latest=all.find(m=>!m.hidden)||null,s=info(t)||{ticker:t,name:t,country:"SE"};
+      return {t,s,all,latest,status:latest?modelStatus(latest,s):{kind:"hidden",text:"All versions hidden"}}})
+      .sort((a,b)=>String((b.latest||b.all[0]).uploadedAt).localeCompare(String((a.latest||a.all[0]).uploadedAt)));
+    const nUpd=rows.filter(r=>r.status.kind==="update").length;
+    const shown=MM.filter==="update"?rows.filter(r=>r.status.kind==="update"):rows;
+    const loading=gh.token&&DS.models==="loading", failed=gh.token&&DS.models==="error";
+    let h=`<div class="mm-head"><h1>My models</h1><button class="pill primary" data-mm="upload"><svg><use href="#i-up"/></svg>Upload new model</button></div>`;
+    if(!gh.token) h+=`<section class="card mm-empty"><p>Connect GitHub under Settings (on the watchlist page) to see and store your models.</p></section>`;
+    else if(failed) h+=`<section class="card mm-empty"><div class="warn"><b>Your models could not be loaded from GitHub.</b> ${esc(DS.modelsErr)}</div><div class="cp-actions" style="margin-top:10px"><button class="pill" data-mm="retry">Try again</button></div></section>`;
+    else if(loading&&!rows.length) h+=`<section class="card mm-empty"><p class="dim">Loading your models…</p></section>`;
+    else if(!rows.length) h+=`<section class="card mm-empty"><h2>No models yet</h2><p class="dim">Upload your DCF with the Mr. Market transfer sheet. Mr. Market reads which company it is for and keeps every version here.</p></section>`;
+    else{
+      h+=`<div class="seg mm-filter" role="group" aria-label="Filter models"><button data-mm="filter" data-f="all" aria-pressed="${MM.filter==="all"}">All (${rows.length})</button><button data-mm="filter" data-f="update" aria-pressed="${MM.filter==="update"}">Needs update (${nUpd})</button></div>`;
+      h+=`<section class="card mm-list"><div class="mm-row mm-hdr"><span></span><span>Company</span><span>Latest model</span><span>Based on</span><span class="r">Your value</span><span>Status</span></div>`;
+      if(!shown.length) h+=`<p class="dim mm-none">No models need updating right now</p>`;
+      shown.forEach(r=>{
+        const L=r.latest||r.all[0], open=MM.open.has(r.t), tmplOld=L.templateVersion&&L.templateVersion<LATEST_TEMPLATE;
+        h+=`<div class="mm-row${open?" open":""}">
+          <button class="mm-tog" data-mm="toggle" data-t="${esc(r.t)}" aria-expanded="${open}" aria-label="Show versions"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></button>
+          <a class="mm-co" href="#/c/${encodeURIComponent(r.t)}">${flag(r.s.country)}<span><b>${esc(r.s.name)}</b><small>${esc(r.t)}</small></span></a>
+          <span class="mm-file"><span class="fn">${esc(L.fileName)}</span><small title="${esc(new Date(L.uploadedAt).toLocaleString("en-GB"))}">uploaded ${ago(L.uploadedAt)}</small></span>
+          <span>${esc(L.basis||"–")}</span>
+          <span class="r">${L.valuePerShare!=null&&r.latest?fmt(L.valuePerShare):"–"}</span>
+          <span class="mm-status"><span class="chip ${r.status.kind}">${esc(r.status.text)}</span>${tmplOld?`<small class="dim">Template ${esc(L.templateVersion)}, latest is ${LATEST_TEMPLATE}</small>`:""}</span>
+        </div>`;
+        if(open) h+=versionsHtml(r);
+      });
+      h+=`</section>`;
+    }
+    el.innerHTML=`<div class="mm">${h}</div>`;
+  }catch(e){console.error(e);el.innerHTML=`<section class="card mm-empty"><div class="warn"><b>This page could not be shown.</b> ${esc(e.message||String(e))}</div></section>`}
+}
+function ago(iso){
+  const d=new Date(iso); if(isNaN(d)) return "–";
+  const days=Math.floor((Date.now()-d.getTime())/864e5);
+  if(days<=0) return "today"; if(days===1) return "yesterday"; if(days<30) return `${days} days ago`;
+  return "on "+d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+}
+function versionsHtml(r){
+  const vis=r.all.filter(m=>!m.hidden), hid=r.all.filter(m=>m.hidden), showHid=MM.showHidden.has(r.t);
+  const row=(m,i,arr)=>{
+    const prev=arr.slice(i+1).find(x=>x.valuePerShare), ch=prev&&m.valuePerShare?m.valuePerShare/prev.valuePerShare-1:null;
+    const editing=MM.editing===m.json;
+    const d=new Date(m.uploadedAt);
+    return `<tr class="${m.hidden?"is-hidden":""}"><td>${isNaN(d)?"–":d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}<small>${isNaN(d)?"":d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</small></td>
+      <td class="fn">${esc(m.fileName)}</td><td>${esc(m.basis||"–")}</td>
+      <td class="r">${m.valuePerShare!=null?fmt(m.valuePerShare):"–"}${ch!=null&&!m.hidden?` <small class="${ch>=0?"pos":"neg"}">${pct(ch)}</small>`:""}</td>
+      <td class="note-cell">${editing?`<input class="field" id="note-input" maxlength="200" value="${esc(m.note||"")}"><span class="note-act"><button class="link-btn" data-mm="note-save" data-path="${esc(m.json)}">Save</button><button class="link-btn" data-mm="note-cancel">Cancel</button></span>`
+        :`${m.note?esc(m.note):`<span class="dim">No note</span>`} <button class="link-btn sm" data-mm="note-edit" data-path="${esc(m.json)}">${m.note?"Edit":"Add note"}</button>`}</td>
+      <td class="acts"><button class="link-btn sm" data-mm="download" data-path="${esc(m.xlsx)}" data-name="${esc(m.fileName)}">Download</button>
+        <button class="link-btn sm" data-mm="${m.hidden?"show":"hide"}" data-path="${esc(m.json)}">${m.hidden?"Show":"Hide"}</button></td></tr>`;
+  };
+  return `<div class="mm-versions"><table><thead><tr><th>Uploaded</th><th>File</th><th>Based on</th><th class="r">Your value</th><th>Note</th><th></th></tr></thead>
+    <tbody>${vis.map((m,i)=>row(m,i,vis)).join("")}${showHid?hid.map((m,i)=>row(m,i,hid)).join(""):""}</tbody></table>
+    ${hid.length?`<button class="link-btn sm mm-hidtog" data-mm="hidden-toggle" data-t="${esc(r.t)}">${showHid?"Hide":"Show"} ${hid.length} hidden version${hid.length>1?"s":""}</button>`:""}
+    <div class="mm-vacts"><button class="pill" data-mm="upload" data-t="${esc(r.t)}"><svg><use href="#i-up"/></svg>Upload new version</button><a class="pill" href="#/c/${encodeURIComponent(r.t)}">Open company page</a></div></div>`;
+}
+$("view-models").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-mm]"); if(!b) return;
+  const a=b.dataset.mm;
+  try{
+    if(a==="upload") openUpload(b.dataset.t||null);
+    else if(a==="retry"){retryLoads()}
+    else if(a==="filter"){MM.filter=b.dataset.f;renderModelsPage()}
+    else if(a==="toggle"){const t=b.dataset.t;MM.open.has(t)?MM.open.delete(t):MM.open.add(t);renderModelsPage()}
+    else if(a==="hidden-toggle"){const t=b.dataset.t;MM.showHidden.has(t)?MM.showHidden.delete(t):MM.showHidden.add(t);renderModelsPage()}
+    else if(a==="download"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
+    else if(a==="note-edit"){MM.editing=b.dataset.path;renderModelsPage();const i=$("note-input");if(i){i.focus();i.onkeydown=ev=>{if(ev.key==="Enter")document.querySelector('[data-mm="note-save"]').click();if(ev.key==="Escape"){MM.editing=null;renderModelsPage()}}}}
+    else if(a==="note-cancel"){MM.editing=null;renderModelsPage()}
+    else if(a==="note-save"){const v=$("note-input").value.trim();b.disabled=true;await updateIndexEntry(b.dataset.path,{note:v||null},"Edit model note");MM.editing=null;renderModelsPage();toast("Note saved")}
+    else if(a==="hide"){const p=b.dataset.path;await updateIndexEntry(p,{hidden:true},"Hide model version");toast("Version hidden",async()=>{try{await updateIndexEntry(p,{hidden:false},"Show model version")}catch(err){toast(err.message)}},"Undo")}
+    else if(a==="show"){await updateIndexEntry(b.dataset.path,{hidden:false},"Show model version");toast("Version shown again")}
+  }catch(err){toast(err.message)}
+});
 
 /* ---------- automatic update check ----------
    version.json in the repo always holds the latest version. If it differs from the code that is
@@ -594,7 +804,7 @@ async function checkForUpdate(){
 }
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")checkForUpdate()});
 
-function renderAll(){renderBanner();renderTable();renderStatus();renderCompany()}
+function renderAll(){renderBanner();renderTable();renderStatus();renderCompany();renderModelsPage()}
 window.addEventListener("error",e=>{if(e&&e.message)toast("Something went wrong: "+e.message)});
 window.addEventListener("unhandledrejection",e=>{const m=e&&e.reason&&(e.reason.message||String(e.reason));if(m)toast("Something went wrong: "+m)});
 $("app-version").textContent=APP_VERSION;

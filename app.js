@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.21";
+const APP_VERSION="0.22";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */
@@ -508,12 +508,32 @@ function retryLoads(){
   for(const k in ACTUALS) if(ACTUALS[k]===null) delete ACTUALS[k];
   loadModels(); renderCompany();
 }
+/* forecast vs actual: for every reported quarter, use your last model version from before the report */
+const FVA_Q={};
+function comparisonFor(t){
+  const A=ACTUALS[t]; if(!A||!A.quarterly) return null;
+  const vers=MODEL_INDEX.filter(m=>m.ticker===t&&!m.hidden).slice().sort((a,b)=>String(a.uploadedAt).localeCompare(String(b.uploadedAt)));
+  if(!vers.length) return null;
+  const cal=REPORT_CAL[t]||[], list=[];
+  A.quarterly.periods.forEach(Q=>{
+    if(qIndex(Q)==null||A.quarterly.value("net sales",Q)==null) return;
+    const rep=(cal.find(e=>e.quarter===Q)||{}).date||null;
+    const cands=vers.filter(v=>qIndex(v.basis)!=null&&qIndex(v.basis)<qIndex(Q)&&(!rep||String(v.uploadedAt).slice(0,10)<=rep));
+    if(cands.length) list.push({quarter:Q,reportDate:rep,version:cands[cands.length-1]});
+  });
+  list.sort((a,b)=>qIndex(b.quarter)-qIndex(a.quarter));
+  const selected=FVA_Q[t]&&list.some(x=>x.quarter===FVA_Q[t])?FVA_Q[t]:(list[0]&&list[0].quarter);
+  const sel=list.find(x=>x.quarter===selected);
+  if(sel&&!MODEL_DATA[sel.version.json]) ensureModelData(t,sel.version.json);
+  return {list,selected,data:sel?MODEL_DATA[sel.version.json]||null:null};
+}
 function companyCtx(){
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
   let result=null; try{result=data?MMModels.computeValuation(data):null}catch(e){}
   return {s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
     versions:MODEL_INDEX.filter(m=>m.ticker===t&&!m.hidden),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
     wacc:lm?WACC_OVERRIDE[lm.json]:undefined,h:{fmt,pct,esc,fmtDate,flag,daysTo},
+    comparison:comparisonFor(t),
     status:{models:DS.models,modelsErr:DS.modelsErr,actualsErr:ACT_ERR[t]||"",modelDataErr:lm?MODEL_ERR[lm.json]||"":""}};
 }
 function renderCompany(){
@@ -550,6 +570,7 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
     else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_financials.xlsx`)}
     else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
+    else if(a==="fva-q"){FVA_Q[t]=b.dataset.q;renderCompany()}
     else if(a==="retry-load"){toast("Loading again…");retryLoads()}
     else if(a==="wacc-implied"){const lm=latestModel(t);if(lm){const r=MMCompany.impliedWacc(companyCtx());
       if(r.error){toast(r.error)}else{WACC_OVERRIDE[lm.json]=r.wacc;MMCompany.updateValuation($("view-company"),companyCtx(),r.wacc)}}}

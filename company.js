@@ -334,8 +334,13 @@
       <div class="stat"><small>Your value</small><b>${latest ? nf(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? "SEK per share" : loadingModels ? "loading…" : modelsFailed ? "could not load" : "no model yet"}</span></div>
       <div class="stat"><small>Share price</small><b>${s.price != null ? h.fmt(s.price) : "–"}</b><span class="${s.day >= 0 ? "pos" : "neg"}">${s.day != null ? h.pct(s.day, 2) + " today" : ""}</span></div>
       <div class="stat ${up == null ? "" : up >= 0 ? "stat-up" : "stat-down"}"><small>Upside</small><b>${up == null ? "–" : h.pct(up)}</b><span class="dim">${up == null ? "" : up >= 0 ? "your value is above the price" : "your value is below the price"}</span></div>
-      <div class="stat"><small>Model</small><b class="stat-text">${latest ? "Based on " + h.esc(latest.basis || "–") : loadingModels ? "Loading…" : modelsFailed ? "Not loaded" : "No model yet"}</b><span class="dim">${latest ? "uploaded " + day(latest.uploadedAt) : ""}</span></div>
+      <div class="stat${s.modelStatus && s.modelStatus.kind === "update" ? " stat-warn" : ""}"><small>Model</small><b class="stat-text">${latest ? "Based on " + h.esc(latest.basis || "–") : loadingModels ? "Loading…" : modelsFailed ? "Not loaded" : "No model yet"}</b><span class="${s.modelStatus && s.modelStatus.kind === "update" ? "upd-text" : "dim"}">${latest ? (s.modelStatus && s.modelStatus.kind === "update" ? h.esc(s.modelStatus.short) : "uploaded " + day(latest.uploadedAt)) : ""}</span></div>
     </div>`;
+    // a new report since the model: short banner
+    if (latest && s.modelStatus && s.modelStatus.kind === "update" && s.lastReport) {
+      const lr = s.lastReport;
+      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(s.name)} published its ${h.esc(lr.quarter)} report on ${h.fmtDate(lr.date)}.</b> Your model is based on ${h.esc(latest.basis)}.</span>${lr.url ? `<a class="link-btn" href="${h.esc(lr.url)}" target="_blank" rel="noopener">Read report</a>` : ""}</section>`;
+    }
 
     // ---- model card
     const histBtn = ctx.hasActuals ? `<button class="pill" data-action="download-actuals"><svg><use href="#i-down"/></svg>Download historical financials</button>` : "";
@@ -409,11 +414,11 @@
         const prev = versions[i + 1], ch = prev && prev.valuePerShare ? v.valuePerShare / prev.valuePerShare - 1 : null;
         return `<tr><td>${day(v.uploadedAt)}</td><td>${h.esc(v.basis || "–")}</td><td>${nf(v.valuePerShare)}</td>
         <td>${ch == null ? "<span class='dim'>first</span>" : `<span class="${ch >= 0 ? "pos" : "neg"}">${h.pct(ch)}</span>`}</td>
-        <td class="file">${h.esc(v.fileName)}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
+        <td class="file">${h.esc(v.fileName)}${v.note ? `<small class="vnote">${h.esc(v.note)}</small>` : ""}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
       }).join("")}</tbody></table></div></section>`;
     } return html; });
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.19", render, updateValuation, impliedWacc };
+  window.MMCompany = { VERSION: "0.21", render, updateValuation, impliedWacc };
 })();

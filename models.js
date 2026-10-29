@@ -113,7 +113,7 @@
     const D = r => ws.cell("D", r).v;
 
     // settings and header rows
-    let headerRow = 0, statusRow = 0, fiscalYear = null, latestQuarter = null, checkCell = null, version = null;
+    let headerRow = 0, statusRow = 0, fiscalYear = null, latestQuarter = null, checkCell = null, version = null, tickerCell = null;
     const titleCell = ws.cell("A", 1).v;
     for (let r = 1; r <= ws.maxRow; r++) {
       const lab = B(r);
@@ -121,6 +121,7 @@
       else if (lab === "status" && headerRow && !statusRow) statusRow = r;
       else if (lab === "fiscal year") fiscalYear = num(D(r));
       else if (lab === "latest reported quarter") latestQuarter = D(r);
+      else if ((lab === "company ticker" || lab === "ticker") && !headerRow) tickerCell = D(r);
       else if (lab.startsWith("check: any numbers in reported quarters")) checkCell = num(D(r));
       if (r <= 2) {
         for (let c = 1; c <= 20; c++) {
@@ -193,7 +194,7 @@
     }
 
     const tm = typeof titleCell === "string" && /\(([^)]+)\)\s*$/.exec(titleCell);
-    const ticker = tm ? tm[1].trim() : null;
+    const ticker = tickerCell != null && String(tickerCell).trim() ? String(tickerCell).trim() : tm ? tm[1].trim() : null;
     const company = typeof titleCell === "string" ? titleCell.replace(/^.*\u00b7\s*/, "").replace(/\s*\([^)]*\)\s*$/, "").trim() : null;
     const model = {
       schema: 1, ticker, company, templateVersion: version, fiscalYear, latestQuarter,
@@ -312,5 +313,5 @@
     return out;
   }
 
-  window.MMModels = { VERSION: "0.19", readWorkbook, parseTransferSheet, computeValuation, readActuals };
+  window.MMModels = { VERSION: "0.21", readWorkbook, parseTransferSheet, computeValuation, readActuals };
 })();

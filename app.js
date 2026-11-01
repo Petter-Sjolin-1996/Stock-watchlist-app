@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.23";
+const APP_VERSION="0.24";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */
@@ -264,7 +264,7 @@ function renderAddList(){
 
 /* ---------- dialogs ---------- */
 function openDlg(id){closeAll();$(id).classList.add("open");$("scrim").classList.add("open")}
-function closeAll(){["dlg-new","dlg-manage","dlg-add","dlg-settings","dlg-review","scrim"].forEach(i=>$(i).classList.remove("open"));toggleMenu(false)}
+function closeAll(){["dlg-new","dlg-manage","dlg-add","dlg-settings","dlg-review","dlg-fva","scrim"].forEach(i=>$(i).classList.remove("open"));toggleMenu(false)}
 function manageView(step){
   const a=active(), n=a.tickers.length, b=$("manage-body");
   if(step===1){
@@ -571,6 +571,9 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_financials.xlsx`)}
     else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
     else if(a==="fva-q"){FVA_Q[t]=b.dataset.q;renderCompany()}
+    else if(a==="fva-pop"){const p=MMCompany.fvaPopup(b.dataset.cat,companyCtx());
+      if(!p){toast("Not available for this quarter");return}
+      $("fva-t").textContent=p.title;$("fva-body").innerHTML=p.html;openDlg("dlg-fva")}
     else if(a==="retry-load"){toast("Loading again…");retryLoads()}
     else if(a==="wacc-implied"){const lm=latestModel(t);if(lm){const r=MMCompany.impliedWacc(companyCtx());
       if(r.error){toast(r.error)}else{WACC_OVERRIDE[lm.json]=r.wacc;MMCompany.updateValuation($("view-company"),companyCtx(),r.wacc)}}}

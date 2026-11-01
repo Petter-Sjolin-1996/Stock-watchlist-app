@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.24";
+const APP_VERSION="0.25";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */
@@ -431,6 +431,7 @@ async function loadModels(){
     DS.templatesErr="";
   }catch(e){DS.templatesErr=netErr(e);console.error("templates",e)}
   renderAll();
+  if(DS.models==="ok") rollAll();
 }
 const b64bytes=buf=>{const u8=new Uint8Array(buf);let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)};
 const b64text=str=>b64bytes(new TextEncoder().encode(str));
@@ -485,6 +486,7 @@ async function ensureActuals(t){
     else if(!r.ok) throw new Error(httpErr(r.status));
     else ACTUALS[t]=await MMModels.readActuals(await r.arrayBuffer());
     delete ACT_ERR[t];
+    setTimeout(()=>maybeRoll(t),0);
   }catch(e){ACT_ERR[t]=netErr(e);RETRY_AT["A:"+t]=Date.now()+20000;console.error("actuals",e)}
   finally{LOADING.delete("A:"+t)}
   if(currentCompany===t) renderCompany();
@@ -525,7 +527,10 @@ function comparisonFor(t){
   const selected=FVA_Q[t]&&list.some(x=>x.quarter===FVA_Q[t])?FVA_Q[t]:(list[0]&&list[0].quarter);
   const sel=list.find(x=>x.quarter===selected);
   if(sel&&!MODEL_DATA[sel.version.json]) ensureModelData(t,sel.version.json);
-  return {list,selected,data:sel?MODEL_DATA[sel.version.json]||null:null};
+  let bridge=null;
+  if(sel){const au=MODEL_INDEX.find(m=>m.ticker===t&&m.auto&&m.rolledFrom===sel.version.json&&m.basis===sel.quarter);
+    if(au){const d=MODEL_DATA[au.json]; if(d) bridge=d.valueBridge||null; else ensureModelData(t,au.json)}}
+  return {list,selected,data:sel?MODEL_DATA[sel.version.json]||null:null,bridge};
 }
 function companyCtx(){
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
@@ -571,6 +576,7 @@ $("view-company").addEventListener("click",async e=>{
     else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_financials.xlsx`)}
     else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
     else if(a==="fva-q"){FVA_Q[t]=b.dataset.q;renderCompany()}
+    else if(a==="keep"){const lm=latestModel(t);if(lm){b.disabled=true;await updateIndexEntry(lm.json,{reviewed:true,reviewedAt:new Date().toISOString()},`Reviewed ${lm.basis}: assumptions kept (${t})`);toast("Assumptions kept")}}
     else if(a==="fva-pop"){const p=MMCompany.fvaPopup(b.dataset.cat,companyCtx());
       if(!p){toast("Not available for this quarter");return}
       $("fva-t").textContent=p.title;$("fva-body").innerHTML=p.html;openDlg("dlg-fva")}
@@ -703,6 +709,44 @@ async function saveModel(){
   }catch(err){btn.disabled=false;btn.textContent="Save model";toast(err.message)}
 }
 
+/* ---------- automatic roll-forward with new actuals (step 3) ----------
+   When the historical file has the quarter after your latest model, Mr. Market applies it to a copy of the
+   model and saves it as a new version. Your own uploads and Excel files are never changed. */
+const ROLLING=new Set();
+const qLabel=n=>`Q${((n-1)%4)+1} ${Math.floor((n-1)/4)}`;
+async function maybeRoll(t){
+  if(!gh.token||DS.models!=="ok"||ROLLING.has(t)) return;
+  const lm=latestModel(t), A=ACTUALS[t];
+  if(!lm||!A||!A.quarterly||qIndex(lm.basis)==null) return;
+  const Q=qLabel(qIndex(lm.basis)+1);
+  if(A.quarterly.value("net sales",Q)==null) return;
+  if(MODEL_INDEX.some(m=>m.ticker===t&&m.rolledFrom===lm.json&&m.basis===Q)) return;
+  ROLLING.add(t);
+  try{
+    let data=MODEL_DATA[lm.json];
+    if(!data){const r=await getJson(lm.json);data=r.data;if(!data)return;MODEL_DATA[lm.json]=data}
+    const r=MMModels.rollForward(data,A,Q);
+    if(r.error){console.warn("roll-forward",t,r.error);return}
+    const now=new Date(), stamp=now.toISOString().replace(/[-:]/g,"").slice(0,15);
+    const jsonPath=`models/${safeT(t)}/${stamp}_auto.json`, msg=`${Q} actuals added by Mr. Market (${t})`;
+    const note=`${Q} actuals added by Mr. Market`;
+    const data2=Object.assign(r.model,{ticker:t,fileName:lm.fileName,uploadedAt:now.toISOString(),auto:true,rolledFrom:lm.json});
+    await putFile(jsonPath,b64text(JSON.stringify(data2)),msg);
+    const idx=await getJson("models/index.json"), list=(idx.data&&idx.data.models)||[];
+    if(list.some(m=>m.ticker===t&&m.rolledFrom===lm.json&&m.basis===Q)) return;      // another device was quicker
+    const s0=info(t);
+    list.unshift({ticker:t,uploadedAt:now.toISOString(),basis:Q,valuePerShare:+r.result.vps.toFixed(4),fileName:lm.fileName,xlsx:lm.xlsx,json:jsonPath,
+      templateVersion:lm.templateVersion||null,note,auto:true,rolledFrom:lm.json,reviewed:false,priceAtUpload:s0&&s0.price!=null?s0.price:null,priceDate:s0&&s0.priceDate||null});
+    await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
+    MODEL_INDEX=list.sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt))); MODEL_DATA[jsonPath]=data2;
+    toast(`${Q} actuals added to your ${s0?s0.name:t} model`);
+    renderAll();
+    setTimeout(()=>maybeRoll(t),50);          // more quarters waiting? apply them one by one
+  }catch(e){console.error("roll-forward",e)}
+  finally{ROLLING.delete(t)}
+}
+function rollAll(){new Set(MODEL_INDEX.map(m=>m.ticker)).forEach(t=>{if(ACTUALS[t]!==undefined)maybeRoll(t);else ensureActuals(t)})}
+
 /* ---------- index updates: notes and hidden versions (a few bytes in models/index.json) ---------- */
 async function updateIndexEntry(jsonPath,patch,message){
   const idx=await getJson("models/index.json");
@@ -719,6 +763,7 @@ const MM={filter:"all",open:new Set(),showHidden:new Set(),editing:null};
 function modelStatus(entry,s){
   const bq=qIndex(entry.basis);
   if(bq==null) return {kind:"unknown",text:"Status unknown",short:"Status unknown"};
+  if(entry.auto&&!entry.reviewed) return {kind:"update",text:`${entry.basis} actuals added by Mr. Market · not reviewed`,short:`${entry.basis.split(" ")[0]} actuals added · not reviewed`};
   const lr=s&&s.lastReport, nr=s&&s.nextReportInfo;
   if(lr&&qIndex(lr.quarter)>bq){
     if(entry.reviewedQuarter===lr.quarter) return {kind:"ok",text:`${lr.quarter} reviewed · assumptions kept`,short:`Reviewed ${lr.quarter}`};
@@ -781,7 +826,7 @@ function versionsHtml(r){
     const editing=MM.editing===m.json;
     const d=new Date(m.uploadedAt);
     return `<tr class="${m.hidden?"is-hidden":""}"><td>${isNaN(d)?"–":d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}<small>${isNaN(d)?"":d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</small></td>
-      <td class="fn">${esc(m.fileName)}</td><td>${esc(m.basis||"–")}</td>
+      <td class="fn">${m.auto?`<span class="auto-badge">Auto</span>`:""}${esc(m.auto?"Mr. Market update":m.fileName)}</td><td>${esc(m.basis||"–")}</td>
       <td class="r">${m.valuePerShare!=null?fmt(m.valuePerShare):"–"}${ch!=null&&!m.hidden?` <small class="${ch>=0?"pos":"neg"}">${pct(ch)}</small>`:""}</td>
       <td class="note-cell">${editing?`<input class="field" id="note-input" maxlength="200" value="${esc(m.note||"")}"><span class="note-act"><button class="link-btn" data-mm="note-save" data-path="${esc(m.json)}">Save</button><button class="link-btn" data-mm="note-cancel">Cancel</button></span>`
         :`${m.note?esc(m.note):`<span class="dim">No note</span>`} <button class="link-btn sm" data-mm="note-edit" data-path="${esc(m.json)}">${m.note?"Edit":"Add note"}</button>`}</td>

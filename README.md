@@ -46,3 +46,4 @@ Upload all changed files in one commit (Add file → Upload files), so GitHub Pa
 - v0.22: Forecast vs actual card: per reported quarter, your last model before the report vs actuals (sales, adjusted EBITDA, margin by business area and group), quarter chips.
 - v0.23: forecast vs actual redesign (category squares, thin line with a marker per row, no headline), free cash flow at group level.
 - v0.24: click Net sales, Adj. EBITDA or Free cash flow in Forecast vs actual for a pop-up with what drove the difference (bridge charts).
+- v0.25: automatic roll-forward: new quarter's actuals applied to a copy of your model (reported quarter, balance sheet and valuation date), saved as an Auto version; value bridge in Forecast vs actual; Keep my assumptions.

@@ -325,5 +325,5 @@
     return out;
   }
 
-  window.MMModels = { VERSION: "0.23", readWorkbook, parseTransferSheet, computeValuation, readActuals };
+  window.MMModels = { VERSION: "0.24", readWorkbook, parseTransferSheet, computeValuation, readActuals };
 })();

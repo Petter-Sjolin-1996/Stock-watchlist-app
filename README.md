@@ -45,3 +45,4 @@ Upload all changed files in one commit (Add file → Upload files), so GitHub Pa
 - v0.21: report detection: last and next report dates (reports.json first, then Yahoo), 'Reported' in the watchlist for a week, amber 'Q3 reported · not reviewed' model status, banner on the company page.
 - v0.22: Forecast vs actual card: per reported quarter, your last model before the report vs actuals (sales, adjusted EBITDA, margin by business area and group), quarter chips.
 - v0.23: forecast vs actual redesign (category squares, thin line with a marker per row, no headline), free cash flow at group level.
+- v0.24: click Net sales, Adj. EBITDA or Free cash flow in Forecast vs actual for a pop-up with what drove the difference (bridge charts).

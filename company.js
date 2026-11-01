@@ -348,7 +348,7 @@
     [sales, ebitda, margin, cash].forEach(g => g.forEach(r => { r.d = dev(r); }));
     return { sales, ebitda, margin, cash };
   }
-  function fvaBlock(title, rows, h) {
+  function fvaBlock(title, rows, h, pop) {
     const pp = rows[0] && rows[0].pp, band = pp ? 0.5 : 0.02;
     const vals = rows.map(r => r.d).filter(x => x != null);
     if (!rows.length) return "";
@@ -357,7 +357,8 @@
     const lbl = x => { const v = pp ? Math.abs(x) : Math.abs(x * 100), t = v.toFixed(1), sign = t === "0.0" ? "" : x >= 0 ? "+" : "−"; return pp ? `${sign}${t} pp` : `${sign}${t}%`; };
     const num = x => x == null ? "–" : pp ? (x * 100).toFixed(1) + "%" : h.fmt(x, 0);
     const bandL = pos(-band), bandW = pos(band) - pos(-band);
-    return `<div class="fva-group"><div class="fva-cat">${h.esc(title)}</div><div class="fva-rows">` + rows.map(r => {
+    const cat = pop ? `<button class="fva-cat clickable" data-action="fva-pop" data-cat="${pop}" aria-label="What drove ${h.esc(title)}"><span>${h.esc(title)}</span><span class="fva-more">›</span></button>` : `<div class="fva-cat">${h.esc(title)}</div>`;
+    return `<div class="fva-group">${cat}<div class="fva-rows">` + rows.map(r => {
       const has = r.d != null, inLine = has && Math.abs(r.d) <= band, col = !has || inLine ? "#8A929E" : r.d > 0 ? GREEN : REDB;
       return `<div class="fva-row${r.total ? " total" : ""}" title="${h.esc(r.name)}: forecast ${num(r.f)}, actual ${num(r.a)}">
         <span class="fva-lab">${h.esc(r.name)}</span>
@@ -367,6 +368,122 @@
         <span class="fva-num">${num(r.f)} → ${num(r.a)}</span></div>`;
     }).join("") + `</div></div>`;
   }
+
+  /* ================= "what drove it" pop-ups ================= */
+  const prevYear = Q => Q.replace(/(\d{4})$/, y => String(+y - 1));
+  // bridge chart: start total → deltas (green helped, red hurt) → end total; optional dashed marker line
+  function bridge(steps, h, marker) {
+    const W = 680, H = 300, l = 10, r = 10, t = 30, b = 46, cw = W - l - r, ch = H - t - b;
+    let run = 0; const bars = steps.map(st => {
+      if (st.total) { run = st.value; return { ...st, from: 0, to: st.value }; }
+      const o = { ...st, from: run, to: run + st.value }; run += st.value; return o;
+    });
+    const all = bars.flatMap(x => [x.from, x.to]).concat(marker ? [marker.value] : []);
+    const hi = Math.max(...all) * 1.08, lo = Math.min(0, ...all);
+    const y = v => t + (hi - v) / (hi - lo) * ch, bw = cw / bars.length;
+    let g = `<line x1="${l}" x2="${W - r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>`;
+    bars.forEach((x, i) => {
+      const top = y(Math.max(x.from, x.to)), bot = y(Math.min(x.from, x.to)), xc = l + bw * (i + 0.5), w = bw * 0.56;
+      const col = x.total ? (x.start ? LIGHT : NAVY) : x.value >= 0 ? GREEN : REDB;
+      g += `<rect x="${xc - w / 2}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${col}"/>`;
+      g += label(xc, top - 7, (x.total ? "" : x.value >= 0 ? "+" : "−") + h.fmt(Math.abs(x.value), 0));
+      x.label.split("\n").forEach((part, j) => { g += label(xc, H - b + 20 + j * 15, h.esc(part), { fill: "var(--muted)" }); });
+    });
+    if (marker) {
+      const my = y(marker.value);
+      g += `<line x1="${l}" x2="${W - r}" y1="${my}" y2="${my}" stroke="var(--ink)" stroke-dasharray="4 4" opacity=".55"/>` +
+           label(l + 4, my - 6, `${h.esc(marker.label)} ${h.fmt(marker.value, 0)}`, { anchor: "start", size: 11.5, fill: "var(--muted)" });
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img">${g}</svg>`;
+  }
+  // paired horizontal bars: your forecast (light) vs actual (navy) per item
+  function pairs(items, h, fmtv) {
+    const max = Math.max(...items.flatMap(x => [Math.abs(x.f || 0), Math.abs(x.a || 0)]), 1);
+    const w = v => Math.abs(v || 0) / max * 100;
+    return `<div class="pp">` + items.map(x => `<div class="pp-row"><span class="pp-lab">${h.esc(x.name)}</span>
+      <span class="pp-bars"><span class="pp-bar f" style="width:${w(x.f)}%"></span><span class="pp-bar a" style="width:${w(x.a)}%"></span></span>
+      <span class="pp-val"><span class="dim">${fmtv(x.f)}</span><b>${fmtv(x.a)}</b></span></div>`).join("") + `</div>`;
+  }
+  // diverging bars around zero, two series per row
+  function diverging(items, keys, h) {
+    const max = Math.max(...items.flatMap(x => keys.map(k => Math.abs(x[k.key] || 0))), 1);
+    return `<div class="dv">` + items.map(x => `<div class="dv-row"><span class="dv-lab">${h.esc(x.name)}</span><span class="dv-cells">` +
+      keys.map(k => { const v = x[k.key] || 0, wd = Math.abs(v) / max * 50;
+        const t = h.fmt(Math.abs(v), 0);
+        return `<span class="dv-cell"><span class="dv-track"><span class="dv-zero"></span><span class="dv-bar" style="${v >= 0 ? `left:50%` : `right:50%`};width:${wd}%;background:${v >= 0 ? k.pos : k.neg}"></span></span><span class="dv-v">${t === "0" ? "0" : (v >= 0 ? "+" : "−") + t}</span></span>`; }).join("") +
+      `</span></div>`).join("") + `</div>`;
+  }
+  const legendHtml = items => `<div class="legend kc-legend pop-legend">${items.map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join("")}</div>`;
+
+  function fvaPopup(cat, ctx) {
+    const { h, actuals: A } = ctx, c = ctx.comparison;
+    if (!c || !c.data || !A || !A.quarterly) return null;
+    const Q = c.selected, data = c.data, P = data.periods, i = P.findIndex(p => p.label === Q);
+    if (i < 0) return null;
+    const v = arr => (arr && arr[i] != null ? arr[i] : 0), S = A.segments, LY = prevYear(Q);
+    const res = MMModels.computeValuation(data), q = k => A.quarterly.value(k, Q);
+    if (cat === "sales") {
+      const act = q("net sales"), ly = A.quarterly.value("net sales", LY), acq = q("acquired sales"), fx = q("currency effect");
+      const fS = res.sales[i];
+      let chart;
+      if (act != null && ly != null && acq != null && fx != null) {
+        const org = act - ly - acq - fx;
+        chart = bridge([{ label: LY, value: ly, total: true, start: true }, { label: "Organic", value: org }, { label: "Acquisitions", value: acq },
+          { label: "Currency", value: fx }, { label: Q, value: act, total: true }], h, { value: fS, label: "Your forecast" });
+      } else chart = `<p class="dim">The split into organic growth and acquisitions is not available for ${h.esc(Q)}</p>`;
+      const rows = data.sales.map(sg => {
+        const lyS = S ? S.seg("net sales by business area", sg.name, LY) : null, aS = S ? S.seg("net sales by business area", sg.name, Q) : null;
+        const org = S ? S.seg("organic growth by business area", sg.name, Q) : null;
+        return { name: sg.name, f: lyS ? sg.values[i] / lyS - 1 : null, a: lyS && aS != null ? aS / lyS - 1 : null, org };
+      });
+      const max = Math.max(...rows.flatMap(r => [Math.abs(r.f || 0), Math.abs(r.a || 0)]), 0.05);
+      const pc = x => { if (x == null) return "–"; const t = Math.abs(x * 100).toFixed(0); return t === "0" ? "0%" : `${x >= 0 ? "+" : "−"}${t}%`; };
+      const growth = `<div class="gr">` + rows.map(r => {
+        const w = x => Math.max(0, (x || 0)) / max * 100, orgW = w(Math.min(r.org ?? r.a, r.a)), totW = w(r.a);
+        return `<div class="gr-row"><span class="gr-lab">${h.esc(r.name)}</span><span class="gr-track">
+          <span class="gr-bar org" style="width:${orgW}%"></span><span class="gr-bar acq" style="left:${orgW}%;width:${Math.max(0, totW - orgW)}%"></span>
+          ${r.f != null ? `<span class="gr-tick" style="left:${w(r.f)}%"></span>` : ""}</span>
+          <span class="gr-val"><b>${pc(r.a)}</b><span class="dim">${r.org != null ? "organic " + pc(r.org) + " · " : ""}forecast ${pc(r.f)}</span></span></div>`;
+      }).join("") + `</div>`;
+      return { title: `Net sales ${Q}`, html: `<h4 class="pop-h">Sales vs ${h.esc(LY)}</h4>${chart}
+        <h4 class="pop-h">Growth vs ${h.esc(LY)} by business area</h4>${legendHtml([[NAVY, "Organic"], ["#5B8FD1", "Acquisitions & currency"], ["var(--ink)", "Your forecast"]])}${growth}` };
+    }
+    if (cat === "ebitda") {
+      const rows = data.sales.map(sg => {
+        const e = data.ebitda.find(x => x.name === sg.name), fS = sg.values[i], fE = e ? e.values[i] : null, fM = fS ? fE / fS : 0;
+        const aS = S ? S.seg("net sales by business area", sg.name, Q) : null, aE = S ? S.seg("adjusted ebitda by business area", sg.name, Q) : null;
+        return { name: sg.name, volume: aS != null ? (aS - fS) * fM : 0, margin: aE != null && aS != null ? aE - aS * fM : 0 };
+      });
+      const fE = res.ebitda[i], aE = q("adjusted ebitda");
+      const vol = rows.reduce((s2, r) => s2 + r.volume, 0), mar = rows.reduce((s2, r) => s2 + r.margin, 0);
+      const other = aE != null ? aE - fE - vol - mar : 0;
+      const chart = bridge([{ label: "Your\nforecast", value: fE, total: true, start: true }, { label: "Higher/lower\nsales", value: vol },
+        { label: "Margin", value: mar }, { label: "Central costs\n& other", value: other }, { label: "Actual", value: aE, total: true }], h);
+      return { title: `Adjusted EBITDA ${Q}`, html: `<h4 class="pop-h">From your forecast to actual</h4>${chart}
+        <h4 class="pop-h">By business area</h4>${legendHtml([["#7FB89A", "Sales effect"], [GREEN, "Margin effect"]])}
+        ${diverging(rows, [{ key: "volume", pos: "#7FB89A", neg: "#E3A39E" }, { key: "margin", pos: GREEN, neg: REDB }], h)}
+        <ul class="kc-notes"><li>Sales effect: sales difference at your forecast margin · Margin effect: margin difference on actual sales</li></ul>` };
+    }
+    if (cat === "cash") {
+      const rate = (tax, pbt) => (pbt > 0 ? Math.min(0.4, Math.max(0, tax / pbt)) : 0);
+      const f = { ebitda: res.ebitda[i], tax: res.ebit[i] * Math.min(0.4, Math.max(0, res.taxRate[i] || 0)), capex: v(data.lines.capex), wc: v(data.lines.nwc) };
+      const ebit = q("ebit"), dep = q("depreciation"), am = q("amortisation"), tx = q("income tax"), pbt = q("profit before tax");
+      const a = { ebitda: ebit != null ? ebit + (dep || 0) + (am || 0) : null, tax: ebit != null ? ebit * rate(tx || 0, pbt || 0) : null, capex: q("capex"), wc: q("increase in working capital (cash flow)") };
+      if ([a.ebitda, a.tax, a.capex, a.wc].some(x => x == null)) return { title: `Free cash flow ${Q}`, html: `<p class="dim">Not all cash flow items are available for ${h.esc(Q)}</p>` };
+      const fF = f.ebitda - f.tax - f.capex - f.wc, aF = a.ebitda - a.tax - a.capex - a.wc;
+      const chart = bridge([{ label: "Your\nforecast", value: fF, total: true, start: true }, { label: "EBITDA", value: a.ebitda - f.ebitda },
+        { label: "Tax", value: -(a.tax - f.tax) }, { label: "Capex", value: -(a.capex - f.capex) }, { label: "Working\ncapital", value: -(a.wc - f.wc) },
+        { label: "Actual", value: aF, total: true }], h);
+      const fm = x => (x < 0 ? "−" : "") + h.fmt(Math.abs(x), 0);
+      return { title: `Free cash flow ${Q}`, html: `<h4 class="pop-h">From your forecast to actual</h4>${chart}
+        <h4 class="pop-h">Forecast vs actual per item</h4>${legendHtml([[LIGHT, "Your forecast"], [NAVY, "Actual"]])}
+        ${pairs([{ name: "EBITDA", f: f.ebitda, a: a.ebitda }, { name: "Tax on EBIT", f: f.tax, a: a.tax }, { name: "Capex", f: f.capex, a: a.capex },
+                 { name: "Working capital", f: f.wc, a: a.wc }], h, fm)}
+        <ul class="kc-notes"><li>Free cash flow = EBITDA − tax on EBIT − capex − increase in working capital (negative = released)</li></ul>` };
+    }
+    return null;
+  }
+
   function compareCard(ctx) {
     const { h } = ctx, c = ctx.comparison;
     if (!c) return "";
@@ -381,7 +498,7 @@
       if (!rows) body = `<p class="dim">No forecast for ${h.esc(sel.quarter)} in that model version</p>`;
       else {
         body = `<div class="fva-cols"><span></span><span></span><span class="fva-axis"><span>Below forecast</span><span>Above forecast</span></span><span></span><span class="fva-num-h">Forecast → actual</span></div>
-          ${fvaBlock("Net sales", rows.sales, h)}${fvaBlock("Adj. EBITDA", rows.ebitda, h)}${fvaBlock("EBITDA margin", rows.margin, h)}${fvaBlock("Free cash flow", rows.cash, h)}`;
+          ${fvaBlock("Net sales", rows.sales, h, "sales")}${fvaBlock("Adj. EBITDA", rows.ebitda, h, "ebitda")}${fvaBlock("EBITDA margin", rows.margin, h)}${fvaBlock("Free cash flow", rows.cash, h, "cash")}`;
       }
     }
     const v = sel.version, up = v.uploadedAt ? h.fmtDate(v.uploadedAt.slice(0, 10)) : "–";
@@ -496,5 +613,5 @@
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.23", render, updateValuation, impliedWacc };
+  window.MMCompany = { VERSION: "0.24", render, updateValuation, impliedWacc, fvaPopup };
 })();

@@ -325,5 +325,39 @@
     return out;
   }
 
-  window.MMModels = { VERSION: "0.24", readWorkbook, parseTransferSheet, computeValuation, readActuals };
+  /* ---------- 6. roll a model forward with a reported quarter ----------
+     Only facts change: the quarter becomes reported (actual figures), the balance sheet moves to the quarter end
+     and the valuation date with it. All forecasts and valuation assumptions stay exactly as the user set them. */
+  function rollForward(model, A, Q) {
+    const i = model.periods.findIndex(p => p.label === Q && norm(p.status) === "forecast");
+    if (i < 0) return { error: `The model has no forecast for ${Q}` };
+    if (!A || !A.quarterly) return { error: "No historical data" };
+    const qv = k => A.quarterly.value(k, Q), S = A.segments;
+    const bs = { netDebt: qv("net debt"), leases: qv("lease liabilities"), other: qv("earn-outs"), shares: qv("shares outstanding") };
+    if (Object.values(bs).some(v => v == null)) return { error: `Balance sheet for ${Q} is missing in the historical data` };
+    if (qv("net sales") == null) return { error: `Net sales for ${Q} are missing` };
+    const clone = x => JSON.parse(JSON.stringify(x));
+    // value bridge, one change at a time
+    const base = computeValuation(model), sh0 = model.inputs.shares;
+    const mA = clone(model); mA.periods[i].status = "Reported";
+    const v1 = computeValuation(mA).vps;
+    const cashRemoved = -(base.pv[i] || 0) / sh0, time = v1 - base.vps - cashRemoved;
+    const mB = clone(mA); mB.inputs.netDebt = bs.netDebt;
+    const v2 = computeValuation(mB).vps;
+    const m = clone(mA); Object.assign(m.inputs, bs);
+    // actual figures in the reported column (for reference; the valuation only uses forecast periods)
+    m.sales.forEach(sg => { sg.values[i] = S ? S.seg("net sales by business area", sg.name, Q) : null; });
+    m.ebitda.forEach(sg => { sg.values[i] = S ? S.seg("adjusted ebitda by business area", sg.name, Q) : null; });
+    const set = (k, v) => { if (m.lines[k]) m.lines[k][i] = v == null ? null : v; };
+    set("elim", S ? S.seg("net sales by business area", "eliminations", Q) : null);
+    set("central", S ? S.seg("adjusted ebitda by business area", "central costs & eliminations", Q) : null);
+    set("dep", qv("depreciation")); set("amort", qv("amortisation")); set("fin", qv("net financial costs"));
+    set("tax", qv("income tax")); set("capex", qv("capex")); set("nwc", qv("increase in working capital (cash flow)"));
+    m.latestQuarter = "Q" + m.periods[i].q; m.basis = Q;
+    const fin = computeValuation(m);
+    m.valueBridge = { quarter: Q, base: base.vps, time, cash: cashRemoved + (v2 - v1), other: fin.vps - v2, final: fin.vps };
+    return { model: m, result: fin };
+  }
+
+  window.MMModels = { VERSION: "0.25", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward };
 })();

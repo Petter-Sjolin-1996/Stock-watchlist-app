@@ -372,21 +372,25 @@
   /* ================= "what drove it" pop-ups ================= */
   const prevYear = Q => Q.replace(/(\d{4})$/, y => String(+y - 1));
   // bridge chart: start total → deltas (green helped, red hurt) → end total; optional dashed marker line
-  function bridge(steps, h, marker) {
-    const W = 680, H = 300, l = 10, r = 10, t = 30, b = 46, cw = W - l - r, ch = H - t - b;
+  function bridge(steps, h, marker, dec = 0, zoom = false) {
+    const W = 680, H = zoom ? 240 : 300, l = 10, r = 10, t = 30, b = 46, cw = W - l - r, ch = H - t - b;
     let run = 0; const bars = steps.map(st => {
       if (st.total) { run = st.value; return { ...st, from: 0, to: st.value }; }
       const o = { ...st, from: run, to: run + st.value }; run += st.value; return o;
     });
     const all = bars.flatMap(x => [x.from, x.to]).concat(marker ? [marker.value] : []);
-    const hi = Math.max(...all) * 1.08, lo = Math.min(0, ...all);
+    let hi = Math.max(...all) * 1.08, lo = Math.min(0, ...all);
+    if (zoom) {
+      const pts = bars.flatMap(x => x.total ? [x.to] : [x.from, x.to]), mn = Math.min(...pts), mx = Math.max(...pts), span = (mx - mn) || mx * 0.05;
+      lo = Math.max(0, mn - span * 1.2); hi = mx + span * 0.35;
+    }
     const y = v => t + (hi - v) / (hi - lo) * ch, bw = cw / bars.length;
-    let g = `<line x1="${l}" x2="${W - r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>`;
+    let g = `<line x1="${l}" x2="${W - r}" y1="${y(zoom ? lo : 0)}" y2="${y(zoom ? lo : 0)}" stroke="var(--line)"/>`;
     bars.forEach((x, i) => {
-      const top = y(Math.max(x.from, x.to)), bot = y(Math.min(x.from, x.to)), xc = l + bw * (i + 0.5), w = bw * 0.56;
+      const top = y(Math.max(x.from, x.to)), bot = x.total && zoom ? y(lo) : y(Math.min(x.from, x.to)), xc = l + bw * (i + 0.5), w = bw * 0.56;
       const col = x.total ? (x.start ? LIGHT : NAVY) : x.value >= 0 ? GREEN : REDB;
       g += `<rect x="${xc - w / 2}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${col}"/>`;
-      g += label(xc, top - 7, (x.total ? "" : x.value >= 0 ? "+" : "−") + h.fmt(Math.abs(x.value), 0));
+      g += label(xc, top - 7, (x.total ? "" : x.value >= 0 ? "+" : "−") + h.fmt(Math.abs(x.value), dec));
       x.label.split("\n").forEach((part, j) => { g += label(xc, H - b + 20 + j * 15, h.esc(part), { fill: "var(--muted)" }); });
     });
     if (marker) {
@@ -499,6 +503,11 @@
       else {
         body = `<div class="fva-cols"><span></span><span></span><span class="fva-axis"><span>Below forecast</span><span>Above forecast</span></span><span></span><span class="fva-num-h">Forecast → actual</span></div>
           ${fvaBlock("Net sales", rows.sales, h, "sales")}${fvaBlock("Adj. EBITDA", rows.ebitda, h, "ebitda")}${fvaBlock("EBITDA margin", rows.margin, h)}${fvaBlock("Free cash flow", rows.cash, h, "cash")}`;
+        const vb = c.bridge;
+        if (vb) body += `<div class="fva-group"><div class="fva-cat">Your value<br><small>SEK per share</small></div><div class="fva-vb">${bridge([
+          { label: `Your model\n(${h.esc(sel.version.basis || "")})`, value: vb.base, total: true, start: true }, { label: "Time\n(3 months)", value: vb.time },
+          { label: `${h.esc(sel.quarter)}\ncash flow`, value: vb.cash }, { label: "Other balance\nsheet items", value: vb.other },
+          { label: `With ${h.esc(sel.quarter)}\nactuals`, value: vb.final, total: true }], h, null, 2, true)}</div></div>`;
       }
     }
     const v = sel.version, up = v.uploadedAt ? h.fmtDate(v.uploadedAt.slice(0, 10)) : "–";
@@ -523,13 +532,16 @@
       <div class="cp-title">${h.flag(s.country)}<div><h1>${h.esc(s.name)}</h1><small>${h.esc(s.ticker)}${nextRep ? " · " + nextRep : ""}</small></div></div>
     </div>
     <div class="cp-stats">
-      <div class="stat"><small>Your value</small><b>${latest ? nf(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? "SEK per share" : loadingModels ? "loading…" : modelsFailed ? "could not load" : "no model yet"}</span></div>
+      <div class="stat"><small>Your value</small><b>${latest ? nf(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? (latest.auto ? `incl. ${h.esc(latest.basis)} actuals` : "SEK per share") : loadingModels ? "loading…" : modelsFailed ? "could not load" : "no model yet"}</span></div>
       <div class="stat"><small>Share price</small><b>${s.price != null ? h.fmt(s.price) : "–"}</b><span class="${s.day >= 0 ? "pos" : "neg"}">${s.day != null ? h.pct(s.day, 2) + " today" : ""}</span></div>
       <div class="stat ${up == null ? "" : up >= 0 ? "stat-up" : "stat-down"}"><small>Upside</small><b>${up == null ? "–" : h.pct(up)}</b><span class="dim">${up == null ? "" : up >= 0 ? "your value is above the price" : "your value is below the price"}</span></div>
       <div class="stat${s.modelStatus && s.modelStatus.kind === "update" ? " stat-warn" : ""}"><small>Model</small><b class="stat-text">${latest ? "Based on " + h.esc(latest.basis || "–") : loadingModels ? "Loading…" : modelsFailed ? "Not loaded" : "No model yet"}</b><span class="${s.modelStatus && s.modelStatus.kind === "update" ? "upd-text" : "dim"}">${latest ? (s.modelStatus && s.modelStatus.kind === "update" ? h.esc(s.modelStatus.short) : "uploaded " + day(latest.uploadedAt)) : ""}</span></div>
     </div>`;
     // a new report since the model: short banner
-    if (latest && s.modelStatus && s.modelStatus.kind === "update" && s.lastReport) {
+    if (latest && latest.auto && !latest.reviewed) {
+      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(latest.basis)} actuals added to your model by Mr. Market.</b> Your forecasts and assumptions are unchanged.</span>
+        <span class="cp-banner-acts"><button class="pill sm" data-action="keep">Keep my assumptions</button><button class="pill sm" data-action="upload">Upload new version</button></span></section>`;
+    } else if (latest && s.modelStatus && s.modelStatus.kind === "update" && s.lastReport) {
       const lr = s.lastReport;
       html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(s.name)} published its ${h.esc(lr.quarter)} report on ${h.fmtDate(lr.date)}.</b> Your model is based on ${h.esc(latest.basis)}.</span>${lr.url ? `<a class="link-btn" href="${h.esc(lr.url)}" target="_blank" rel="noopener">Read report</a>` : ""}</section>`;
     }
@@ -607,11 +619,11 @@
         const prev = versions[i + 1], ch = prev && prev.valuePerShare ? v.valuePerShare / prev.valuePerShare - 1 : null;
         return `<tr><td>${day(v.uploadedAt)}</td><td>${h.esc(v.basis || "–")}</td><td>${nf(v.valuePerShare)}</td>
         <td>${ch == null ? "<span class='dim'>first</span>" : `<span class="${ch >= 0 ? "pos" : "neg"}">${h.pct(ch)}</span>`}</td>
-        <td class="file">${h.esc(v.fileName)}${v.note ? `<small class="vnote">${h.esc(v.note)}</small>` : ""}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
+        <td class="file">${v.auto ? `<span class="auto-badge">Auto</span>Mr. Market update` : h.esc(v.fileName)}${v.note ? `<small class="vnote">${h.esc(v.note)}${v.auto && v.reviewed ? " · reviewed, assumptions kept" : ""}</small>` : ""}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
       }).join("")}</tbody></table></div></section>`;
     } return html; });
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.24", render, updateValuation, impliedWacc, fvaPopup };
+  window.MMCompany = { VERSION: "0.25", render, updateValuation, impliedWacc, fvaPopup };
 })();

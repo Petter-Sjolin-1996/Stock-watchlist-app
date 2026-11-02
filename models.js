@@ -196,9 +196,16 @@
     const tm = typeof titleCell === "string" && /\(([^)]+)\)\s*$/.exec(titleCell);
     const ticker = tickerCell != null && String(tickerCell).trim() ? String(tickerCell).trim() : tm ? tm[1].trim() : null;
     const company = typeof titleCell === "string" ? titleCell.replace(/^.*\u00b7\s*/, "").replace(/\s*\([^)]*\)\s*$/, "").trim() : null;
+    // template 1.2: "Latest reported quarter" holds the full quarter (e.g. "Q3 2026"); older templates use a quarter + fiscal year
+    const full = /^Q([1-4])\s+(\d{4})$/.exec(String(latestQuarter || "").trim());
+    let basis;
+    if (full) { basis = `Q${full[1]} ${full[2]}`; latestQuarter = `Q${full[1]}`; fiscalYear = +full[2]; }
+    else {
+      const firstQ = periods.find(p => p.kind === "Q" && norm(p.status) !== "actual");
+      basis = latestQuarter && fiscalYear ? `${latestQuarter} ${firstQ ? firstQ.label.slice(3) : fiscalYear}` : null;
+    }
     const model = {
-      schema: 1, ticker, company, templateVersion: version, fiscalYear, latestQuarter,
-      basis: latestQuarter && fiscalYear ? `${latestQuarter} ${periods[0] && periods[0].kind === "Q" ? periods[0].label.slice(3) : fiscalYear}` : null,
+      schema: 1, ticker, company, templateVersion: version, fiscalYear, latestQuarter, basis,
       periods: periods.map(({ label, status, kind, q }) => ({ label, status, kind, q })),
       segments: sales.map(s => s.name), sales, ebitda, lines, inputs, sheet: sheetVals
     };
@@ -325,12 +332,66 @@
     return out;
   }
 
+  /* ---------- history (the 4 reported quarters in template 1.2) ---------- */
+  function quartersBack(Q, n) {
+    let q = +Q[1], y = +Q.slice(3); const out = [];
+    for (let k = 0; k < n; k++) { out.unshift(`Q${q} ${y}`); if (q > 1) q--; else { q = 4; y--; } }
+    return out;
+  }
+  // official figures for one quarter, in transfer-sheet terms
+  function historyRow(A, Q) {
+    const qv = k => (A && A.quarterly ? A.quarterly.value(k, Q) : null), S = A && A.segments;
+    const sg = (sec, name) => (S ? S.seg(sec, name, Q) : null);
+    return {
+      sales: name => sg("net sales by business area", name), ebitda: name => sg("adjusted ebitda by business area", name),
+      elim: sg("net sales by business area", "eliminations"), central: sg("adjusted ebitda by business area", "central costs & eliminations"),
+      dep: qv("depreciation"), amort: qv("amortisation"), fin: qv("net financial costs"), tax: qv("income tax"),
+      capex: qv("capex"), nwc: qv("increase in working capital (cash flow)"), hasData: qv("net sales") != null
+    };
+  }
+  // set the history columns of a model (JSON) to the 4 quarters ending with Q
+  function refreshHistory(m, A, Q) {
+    const idx = m.periods.map((p, i) => i).filter(i => norm(m.periods[i].status) === "actual");
+    if (!idx.length) return m;
+    const labels = quartersBack(Q, idx.length);
+    idx.forEach((i, k) => {
+      const h = historyRow(A, labels[k]);
+      m.periods[i].label = labels[k]; m.periods[i].q = +labels[k][1];
+      m.sales.forEach(sg => { sg.values[i] = h.sales(sg.name); });
+      m.ebitda.forEach(sg => { sg.values[i] = h.ebitda(sg.name); });
+      ["elim", "central", "dep", "amort", "fin", "tax", "capex", "nwc"].forEach(k2 => { if (m.lines[k2]) m.lines[k2][i] = h[k2]; });
+    });
+    return m;
+  }
+  // option 1 check: does the history in the user's sheet match the reported figures?
+  function compareHistory(model, A) {
+    const out = { diffs: [], empty: 0, stale: false };
+    const idx = model.periods.map((p, i) => i).filter(i => norm(model.periods[i].status) === "actual");
+    if (!idx.length || !A) return out;
+    out.stale = model.basis && model.periods[idx[idx.length - 1]].label !== model.basis;
+    if (out.stale) return out;
+    const f = x => Math.round(x).toLocaleString("en-US");
+    idx.forEach(i => {
+      const Q = model.periods[i].label, h = historyRow(A, Q);
+      const check = (what, u, o) => {
+        if (u == null) { if (o != null) out.empty++; return; }
+        if (o != null && Math.abs(u - o) > Math.max(1, Math.abs(o) * 0.01)) out.diffs.push(`${Q} ${what}: ${f(u)} in your sheet, ${f(o)} reported`);
+      };
+      model.sales.forEach(sg => check(`${sg.name} sales`, sg.values[i], h.sales(sg.name)));
+      model.ebitda.forEach(sg => check(`${sg.name} EBITDA`, sg.values[i], h.ebitda(sg.name)));
+      [["dep", "depreciation"], ["amort", "amortisation"], ["fin", "net financial costs"], ["tax", "income tax"], ["capex", "capex"], ["nwc", "working capital"]]
+        .forEach(([k, n]) => model.lines[k] && check(n, model.lines[k][i], h[k]));
+    });
+    return out;
+  }
+
   /* ---------- 6. roll a model forward with a reported quarter ----------
      Only facts change: the quarter becomes reported (actual figures), the balance sheet moves to the quarter end
      and the valuation date with it. All forecasts and valuation assumptions stay exactly as the user set them. */
   function rollForward(model, A, Q) {
     const i = model.periods.findIndex(p => p.label === Q && norm(p.status) === "forecast");
     if (i < 0) return { error: `The model has no forecast for ${Q}` };
+    if (+Q[1] === 4) return { error: "At year-end the model needs next year's quarterly forecasts, so please update it yourself", yearEnd: true };
     if (!A || !A.quarterly) return { error: "No historical data" };
     const qv = k => A.quarterly.value(k, Q), S = A.segments;
     const bs = { netDebt: qv("net debt"), leases: qv("lease liabilities"), other: qv("earn-outs"), shares: qv("shares outstanding") };
@@ -354,10 +415,211 @@
     set("dep", qv("depreciation")); set("amort", qv("amortisation")); set("fin", qv("net financial costs"));
     set("tax", qv("income tax")); set("capex", qv("capex")); set("nwc", qv("increase in working capital (cash flow)"));
     m.latestQuarter = "Q" + m.periods[i].q; m.basis = Q;
+    refreshHistory(m, A, Q);
     const fin = computeValuation(m);
     m.valueBridge = { quarter: Q, base: base.vps, time, cash: cashRemoved + (v2 - v1), other: fin.vps - v2, final: fin.vps };
     return { model: m, result: fin };
   }
 
-  window.MMModels = { VERSION: "0.25", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward };
+
+  /* ---------- 7. writing: change a few cells in an .xlsx, keep everything else as it is ---------- */
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = u8 => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  async function deflateRaw(u8) {
+    const stream = new Blob([u8]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  function zipEntries(buf) {
+    const dv = new DataView(buf), u8 = new Uint8Array(buf), dec = new TextDecoder();
+    let eocd = -1;
+    for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error("Not a zip file");
+    const n = dv.getUint16(eocd + 10, true); let p = dv.getUint32(eocd + 16, true); const out = [];
+    for (let k = 0; k < n; k++) {
+      const e = { flags: dv.getUint16(p + 8, true), method: dv.getUint16(p + 10, true), time: dv.getUint16(p + 12, true), date: dv.getUint16(p + 14, true),
+        crc: dv.getUint32(p + 16, true), csize: dv.getUint32(p + 20, true), size: dv.getUint32(p + 24, true) };
+      const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+      e.nameBytes = u8.slice(p + 46, p + 46 + nl); e.name = dec.decode(e.nameBytes);
+      const start = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true);
+      e.data = u8.slice(start, start + e.csize);
+      out.push(e); p += 46 + nl + xl + cl;
+    }
+    return out;
+  }
+  async function entryText(e) { return new TextDecoder().decode(e.method === 8 ? await inflateRaw(e.data) : e.data); }
+  async function setEntryText(e, text) {
+    const raw = new TextEncoder().encode(text);
+    e.crc = crc32(raw); e.size = raw.length; e.data = await deflateRaw(raw); e.csize = e.data.length; e.method = 8;
+  }
+  function writeZip(entries) {
+    const parts = [], central = []; let off = 0;
+    entries.forEach(e => {
+      const flags = e.flags & ~0x0008, h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, flags, true); h.setUint16(8, e.method, true);
+      h.setUint16(10, e.time, true); h.setUint16(12, e.date, true); h.setUint32(14, e.crc, true); h.setUint32(18, e.csize, true);
+      h.setUint32(22, e.size, true); h.setUint16(26, e.nameBytes.length, true); h.setUint16(28, 0, true);
+      parts.push(new Uint8Array(h.buffer), e.nameBytes, e.data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, flags, true); c.setUint16(10, e.method, true);
+      c.setUint16(12, e.time, true); c.setUint16(14, e.date, true); c.setUint32(16, e.crc, true); c.setUint32(20, e.csize, true); c.setUint32(24, e.size, true);
+      c.setUint16(28, e.nameBytes.length, true); c.setUint32(42, off, true);
+      central.push(new Uint8Array(c.buffer), e.nameBytes);
+      off += 30 + e.nameBytes.length + e.data.length;
+    });
+    const cdSize = central.reduce((s2, x) => s2 + x.length, 0), end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, off, true);
+    return new Blob([...parts, ...central, new Uint8Array(end.buffer)]);
+  }
+  const escXml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const refParts = ref => { const m = /^([A-Z]+)(\d+)$/.exec(ref); return { col: colNum(m[1]), row: +m[2] }; };
+  function inRange(ref, range) {
+    const [a, b] = range.split(":"); const r = refParts(ref), A1 = refParts(a), B1 = refParts(b || a);
+    return r.col >= A1.col && r.col <= B1.col && r.row >= A1.row && r.row <= B1.row;
+  }
+  // edits: { "D22": {s: "Q3 2026"} | {v: 123} | {v: null} }
+  function editSheetXml(xmlText, edits) {
+    const pm = /<(\w+:)?sheetData[\s>/]/.exec(xmlText); if (!pm) throw new Error("Unexpected sheet format");
+    const P = pm[1] || "", refs = Object.keys(edits);
+    const cellRe = ref => new RegExp(`<${P}c r="${ref}"(?=[\\s>/])[^>]*?(?:/>|>[\\s\\S]*?</${P}c>)`);
+    const build = (ref, style, e) => {
+      const s = style ? ` s="${style}"` : "";
+      if (e.s != null) return `<${P}c r="${ref}"${s} t="inlineStr"><${P}is><${P}t>${escXml(e.s)}</${P}t></${P}is></${P}c>`;
+      if (e.v == null || !isFinite(e.v)) return `<${P}c r="${ref}"${s}/>`;
+      return `<${P}c r="${ref}"${s}><${P}v>${+(+e.v).toFixed(6)}</${P}v></${P}c>`;
+    };
+    for (const ref of refs) {
+      const m = cellRe(ref).exec(xmlText);
+      if (m) {
+        const old = m[0], sm = / s="(\d+)"/.exec(old.slice(0, old.indexOf(">") + 1));
+        const shared = /<(?:\w+:)?f[^>]*\bt="(shared|array)"[^>]*\bref="([A-Z]+\d+(?::[A-Z]+\d+)?)"/.exec(old);
+        if (shared) {
+          const [a, b] = shared[2].split(":"), A1 = refParts(a), B1 = refParts(b || a);
+          for (let r = A1.row; r <= B1.row; r++) for (let c = A1.col; c <= B1.col; c++) {
+            const rr = colLetters(c) + r;
+            if (!edits[rr]) throw new Error(`Cell ${ref} starts a shared formula (${shared[2]}); the file was not changed`);
+          }
+        }
+        xmlText = xmlText.replace(old, build(ref, sm && sm[1], edits[ref]));
+      } else {
+        const { row, col } = refParts(ref);
+        const rowRe = new RegExp(`<${P}row r="${row}"(?=[\\s>/])[^>]*?(/>|>[\\s\\S]*?</${P}row>)`);
+        const rm = rowRe.exec(xmlText), cell = build(ref, null, edits[ref]);
+        if (rm) {
+          let rowXml = rm[0];
+          if (rm[1] === "/>") rowXml = rowXml.replace(/\/>$/, `>${cell}</${P}row>`);
+          else {
+            const cells = [...rowXml.matchAll(new RegExp(`<${P}c r="([A-Z]+)\\d+"`, "g"))];
+            const next = cells.find(x => colNum(x[1]) > col);
+            rowXml = next ? rowXml.replace(next[0], cell + next[0]) : rowXml.replace(new RegExp(`</${P}row>$`), cell + `</${P}row>`);
+          }
+          xmlText = xmlText.replace(rm[0], rowXml);
+        } else {
+          const rows = [...xmlText.matchAll(new RegExp(`<${P}row r="(\\d+)"`, "g"))], nxt = rows.find(x => +x[1] > row);
+          const newRow = `<${P}row r="${row}">${cell}</${P}row>`;
+          if (nxt) xmlText = xmlText.replace(nxt[0], newRow + nxt[0]);
+          else if (new RegExp(`<${P}sheetData/>`).test(xmlText)) xmlText = xmlText.replace(`<${P}sheetData/>`, `<${P}sheetData>${newRow}</${P}sheetData>`);
+          else xmlText = xmlText.replace(`</${P}sheetData>`, newRow + `</${P}sheetData>`);
+        }
+      }
+    }
+    return xmlText;
+  }
+  async function editWorkbookCells(buf, sheetName, edits) {
+    const entries = zipEntries(buf), get = name => entries.find(e => e.name === name);
+    const wbE = get("xl/workbook.xml"), relE = get("xl/_rels/workbook.xml.rels");
+    if (!wbE || !relE) throw new Error("This file has no Excel workbook inside");
+    let wbX = await entryText(wbE); const relX = await entryText(relE);
+    const sm = new RegExp(`<(?:\\w+:)?sheet [^>]*name="${sheetName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*>`, "i").exec(wbX);
+    if (!sm) throw new Error(`No sheet called "${sheetName}"`);
+    const rid = (/r:id="([^"]+)"/.exec(sm[0]) || /\bid="([^"]+)"/.exec(sm[0]) || [])[1];
+    const tm = new RegExp(`<Relationship [^>]*Id="${rid}"[^>]*>`).exec(relX), target = tm && /Target="([^"]+)"/.exec(tm[0])[1];
+    if (!target) throw new Error("Sheet not found in the workbook");
+    const path = target.startsWith("/") ? target.slice(1) : "xl/" + target.replace(/^\.\//, "");
+    const shE = get(path); if (!shE) throw new Error("Sheet data not found");
+    await setEntryText(shE, editSheetXml(await entryText(shE), edits));
+    // Excel recalculates everything when the file is opened
+    if (/<(\w+:)?calcPr\b/.test(wbX)) wbX = wbX.replace(/<((?:\w+:)?calcPr)\b([^>]*?)(\/?)>/, (m0, tag, attrs, sl) => `<${tag}${attrs.replace(/\sfullCalcOnLoad="[^"]*"/, "")} fullCalcOnLoad="1"${sl}>`);
+    else wbX = wbX.replace(/(<(?:\w+:)?extLst|<\/(?:\w+:)?workbook>)/, `<calcPr fullCalcOnLoad="1"/>$1`);
+    await setEntryText(wbE, wbX);
+    // the calculation chain would point at cells that are no longer formulas: let Excel rebuild it
+    const cc = entries.findIndex(e => e.name === "xl/calcChain.xml");
+    if (cc >= 0) {
+      entries.splice(cc, 1);
+      await setEntryText(relE, relX.replace(/<Relationship [^>]*Target="[^"]*calcChain\.xml"[^>]*\/>/, ""));
+      const ctE = get("[Content_Types].xml");
+      if (ctE) await setEntryText(ctE, (await entryText(ctE)).replace(/<Override [^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/, ""));
+    }
+    return writeZip(entries);
+  }
+
+  /* ---------- 8. put a reported quarter into a transfer sheet (Mr. Market's own cells only) ----------
+     opts.historyOnly: only the history columns (used when you upload your own update)
+     opts.onlyEmpty:   leave history cells you filled in yourself */
+  async function applyQuarterToSheet(buf, A, Q, opts = {}) {
+    const wb = await readWorkbook(buf), ws = await wb.sheet("Transfer sheet");
+    if (!ws) return { error: 'No sheet called "Transfer sheet"' };
+    const B = r => norm(ws.cell("B", r).v);
+    let headerRow = 0, statusRow = 0, latestRow = 0, fyRow = 0, section = null;
+    const rows = { sales: {}, ebitda: {} }, inputs = {};
+    for (let r = 1; r <= ws.maxRow; r++) {
+      const lab = B(r), raw = String(ws.cell("B", r).v || "").trim();
+      if (!lab) continue;
+      if (lab === "line item" && !headerRow) { headerRow = r; continue; }
+      if (lab === "status" && headerRow && !statusRow) { statusRow = r; continue; }
+      if (lab === "latest reported quarter") { latestRow = r; continue; }
+      if (lab === "fiscal year") { fyRow = r; continue; }
+      if (SECTIONS[lab] !== undefined) { section = SECTIONS[lab]; continue; }
+      if (section === "sales") { if (lab.startsWith("eliminations")) rows.elim = r; else if (lab !== "total net sales") rows.sales[raw] = r; }
+      else if (section === "ebitda") { if (lab.startsWith("central")) rows.central = r; else if (lab !== "total ebitda") rows.ebitda[raw] = r; }
+      else if (section === "pnl") {
+        if (lab.startsWith("depreciation")) rows.dep = r; else if (lab.startsWith("amortisation") || lab.startsWith("amortization")) rows.amort = r;
+        else if (lab.startsWith("net financial")) rows.fin = r; else if (lab === "income tax") rows.tax = r;
+      } else if (section === "cash") { if (lab === "capex") rows.capex = r; else if (lab.startsWith("increase in working capital")) rows.nwc = r; }
+      else if (section === "inputs") {
+        if (lab.startsWith("net debt")) inputs.netDebt = r; else if (lab.startsWith("lease liabilities")) inputs.leases = r;
+        else if (lab.startsWith("earn-outs")) inputs.other = r; else if (lab.startsWith("shares outstanding")) inputs.shares = r;
+      }
+    }
+    if (!headerRow || !statusRow || !latestRow) return { error: "The transfer sheet layout was not recognised" };
+    const histCols = [];
+    for (let c = 4; c < 40; c++) { const st = norm(ws.cell(c, statusRow).v); if (st === "actual") histCols.push(c); if (ws.cell(c, headerRow).v == null) break; }
+    const full = /^Q[1-4]\s+\d{4}$/.test(String(ws.cell("D", latestRow).v || "").trim());
+    const edits = {};
+    if (!opts.historyOnly) {
+      if (+Q[1] === 4) return { error: "At year-end the model needs next year's quarterly forecasts, so please update it yourself", yearEnd: true };
+      if (full) edits["D" + latestRow] = { s: Q };
+      else {
+        const fy = num(ws.cell("D", fyRow).v);
+        if (fy !== +Q.slice(3)) return { error: `The sheet's fiscal year (${fy}) does not match ${Q}` };
+        edits["D" + latestRow] = { s: Q.slice(0, 2) };
+      }
+      const qv = k => A.quarterly.value(k, Q);
+      const bs = { netDebt: qv("net debt"), leases: qv("lease liabilities"), other: qv("earn-outs"), shares: qv("shares outstanding") };
+      if (Object.values(bs).some(v => v == null)) return { error: `The balance sheet for ${Q} is missing in the historical data` };
+      const day = { 1: "31 Mar", 2: "30 Jun", 3: "30 Sep", 4: "31 Dec" }[+Q[1]] + " " + Q.slice(3);
+      Object.entries(inputs).forEach(([k, r]) => {
+        edits["D" + r] = { v: bs[k] };
+        const note = ws.cell("E", r).v;
+        if (typeof note === "string" && /\d{1,2} [A-Z][a-z]{2} \d{4}/.test(note)) edits["E" + r] = { s: note.replace(/\d{1,2} [A-Z][a-z]{2} \d{4}/, day) };
+      });
+    }
+    if (full && histCols.length) {
+      const labels = quartersBack(Q, histCols.length);
+      histCols.forEach((c, k) => {
+        const col = colLetters(c), sameLabel = String(ws.cell(c, headerRow).v || "").trim() === labels[k];
+        edits[col + headerRow] = { s: labels[k] };
+        const h = historyRow(A, labels[k]);
+        const put = (r, val) => { if (!r) return; if (opts.onlyEmpty && sameLabel && num(ws.cell(c, r).v) != null) return; edits[col + r] = { v: val }; };
+        Object.entries(rows.sales).forEach(([n, r]) => put(r, h.sales(n)));
+        Object.entries(rows.ebitda).forEach(([n, r]) => put(r, h.ebitda(n)));
+        ["elim", "central", "dep", "amort", "fin", "tax", "capex", "nwc"].forEach(k2 => put(rows[k2], h[k2]));
+      });
+    }
+    if (!Object.keys(edits).length) return { bytes: null, unchanged: true };
+    try { return { bytes: await editWorkbookCells(buf, "Transfer sheet", edits), edits: Object.keys(edits).length }; }
+    catch (e) { return { error: e.message || String(e) }; }
+  }
+
+  window.MMModels = { VERSION: "0.26", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward, refreshHistory, compareHistory, applyQuarterToSheet, quartersBack };
 })();

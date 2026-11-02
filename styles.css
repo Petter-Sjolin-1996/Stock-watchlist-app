@@ -1,4 +1,4 @@
-:root{--mm-version:"0.25"}
+:root{--mm-version:"0.26"}
 :root{
   --bg:#F3F5F8; --surface:#FFFFFF; --ink:#16202A; --muted:#67727D; --line:#E2E6EB; --hover:#F6F8FB;
   --blue:#1B5FAA; --blue-dark:#154C89; --blue-soft:#E7EFF9;
@@ -484,3 +484,11 @@ button.fva-cat:hover{background:#E6EAF2}
 .fva-cat{flex-direction:column}
 .cp-banner-acts{flex:none;flex-wrap:nowrap}
 @media (max-width:820px){.cp-banner-acts{flex-wrap:wrap}}
+
+/* ---------- outdated forecasts (quarter reported, model not updated) ---------- */
+table.assump td.outdated{color:var(--amber);background:var(--amber-soft)}
+table.assump th.outdated{color:var(--amber);background:var(--amber-soft);white-space:normal;min-width:120px}
+table.assump th.outdated small{display:block;font-weight:500;font-size:11px;line-height:1.25;margin-top:2px}
+.pill.sm.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.cp-banner a{color:var(--blue)}
+@media (max-width:820px){.cp-banner-acts{flex:1 1 100%;flex-wrap:wrap}.cp-banner-acts .pill.sm{white-space:normal;text-align:left}}

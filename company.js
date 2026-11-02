@@ -504,7 +504,7 @@
         body = `<div class="fva-cols"><span></span><span></span><span class="fva-axis"><span>Below forecast</span><span>Above forecast</span></span><span></span><span class="fva-num-h">Forecast → actual</span></div>
           ${fvaBlock("Net sales", rows.sales, h, "sales")}${fvaBlock("Adj. EBITDA", rows.ebitda, h, "ebitda")}${fvaBlock("EBITDA margin", rows.margin, h)}${fvaBlock("Free cash flow", rows.cash, h, "cash")}`;
         const vb = c.bridge;
-        if (vb) body += `<div class="fva-group"><div class="fva-cat">Your value<br><small>SEK per share</small></div><div class="fva-vb">${bridge([
+        if (vb) body += `<div class="fva-group"><div class="fva-cat">Your value<small>SEK per share${c.preview ? `<br>if ${h.esc(sel.quarter.split(" ")[0])} actuals are applied` : ""}</small></div><div class="fva-vb">${bridge([
           { label: `Your model\n(${h.esc(sel.version.basis || "")})`, value: vb.base, total: true, start: true }, { label: "Time\n(3 months)", value: vb.time },
           { label: `${h.esc(sel.quarter)}\ncash flow`, value: vb.cash }, { label: "Other balance\nsheet items", value: vb.other },
           { label: `With ${h.esc(sel.quarter)}\nactuals`, value: vb.final, total: true }], h, null, 2, true)}</div></div>`;
@@ -532,18 +532,20 @@
       <div class="cp-title">${h.flag(s.country)}<div><h1>${h.esc(s.name)}</h1><small>${h.esc(s.ticker)}${nextRep ? " · " + nextRep : ""}</small></div></div>
     </div>
     <div class="cp-stats">
-      <div class="stat"><small>Your value</small><b>${latest ? nf(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? (latest.auto ? `incl. ${h.esc(latest.basis)} actuals` : "SEK per share") : loadingModels ? "loading…" : modelsFailed ? "could not load" : "no model yet"}</span></div>
+      <div class="stat"><small>Your value</small><b>${latest ? nf(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? (latest.applied ? `incl. ${h.esc(latest.basis)} actuals` : "SEK per share") : loadingModels ? "loading…" : modelsFailed ? "could not load" : "no model yet"}</span></div>
       <div class="stat"><small>Share price</small><b>${s.price != null ? h.fmt(s.price) : "–"}</b><span class="${s.day >= 0 ? "pos" : "neg"}">${s.day != null ? h.pct(s.day, 2) + " today" : ""}</span></div>
       <div class="stat ${up == null ? "" : up >= 0 ? "stat-up" : "stat-down"}"><small>Upside</small><b>${up == null ? "–" : h.pct(up)}</b><span class="dim">${up == null ? "" : up >= 0 ? "your value is above the price" : "your value is below the price"}</span></div>
       <div class="stat${s.modelStatus && s.modelStatus.kind === "update" ? " stat-warn" : ""}"><small>Model</small><b class="stat-text">${latest ? "Based on " + h.esc(latest.basis || "–") : loadingModels ? "Loading…" : modelsFailed ? "Not loaded" : "No model yet"}</b><span class="${s.modelStatus && s.modelStatus.kind === "update" ? "upd-text" : "dim"}">${latest ? (s.modelStatus && s.modelStatus.kind === "update" ? h.esc(s.modelStatus.short) : "uploaded " + day(latest.uploadedAt)) : ""}</span></div>
     </div>`;
     // a new report since the model: short banner
-    if (latest && latest.auto && !latest.reviewed) {
-      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(latest.basis)} actuals added to your model by Mr. Market.</b> Your forecasts and assumptions are unchanged.</span>
-        <span class="cp-banner-acts"><button class="pill sm" data-action="keep">Keep my assumptions</button><button class="pill sm" data-action="upload">Upload new version</button></span></section>`;
+    if (false) {
     } else if (latest && s.modelStatus && s.modelStatus.kind === "update" && s.lastReport) {
-      const lr = s.lastReport;
-      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(s.name)} published its ${h.esc(lr.quarter)} report on ${h.fmtDate(lr.date)}.</b> Your model is based on ${h.esc(latest.basis)}.</span>${lr.url ? `<a class="link-btn" href="${h.esc(lr.url)}" target="_blank" rel="noopener">Read report</a>` : ""}</section>`;
+      const lr = s.lastReport, ap = ctx.apply;
+      const applyBtn = ap && !ap.error
+        ? `<button class="pill sm primary" data-action="apply-actuals">Apply ${h.esc(ap.quarter.split(" ")[0])} actuals · ${h.fmt(ap.from)} → ${h.fmt(ap.to)}</button>`
+        : ap && ap.error ? `<button class="pill sm" disabled title="${h.esc(ap.error)}">Apply ${h.esc(ap.quarter.split(" ")[0])} actuals</button>` : "";
+      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(s.name)} published its ${h.esc(lr.quarter)} report on ${h.fmtDate(lr.date)}.</b> Your model still uses forecasts for ${h.esc(lr.quarter)}.${ap && ap.error ? ` <span class="dim">${h.esc(ap.error)}</span>` : ""}${lr.url ? ` <a href="${h.esc(lr.url)}" target="_blank" rel="noopener">Read report</a>` : ""}</span>
+        <span class="cp-banner-acts"><button class="pill sm" data-action="upload">Update my model myself</button>${applyBtn}</span></section>`;
     }
 
     // ---- model card
@@ -584,7 +586,10 @@
 
       // key assumptions table
       const cols = P.map((p, i) => i).filter(i => fc[i]);
-      const cell = (v, f) => `<td>${v == null || !isFinite(v) ? "<span class='dim'>–</span>" : f(v)}</td>`;
+      const qi = lab => { const m = /^Q([1-4])\s+(\d{4})$/.exec(String(lab || "")); return m ? +m[2] * 4 + +m[1] : null; };
+      const lr = s.lastReport, out = new Set(cols.filter(i => lr && P[i].kind === "Q" && qi(P[i].label) != null && qi(P[i].label) <= qi(lr.quarter)));
+      let ci = 0;
+      const cell = (v, f) => { const i = cols[ci++ % cols.length]; return `<td class="${out.has(i) ? "outdated" : ""}">${v == null || !isFinite(v) ? "<span class='dim'>–</span>" : f(v)}</td>`; };
       const pctf = v => (v * 100).toFixed(1) + "%";
       const rows = [];
       rows.push(["Net sales, SEK m", cols.map(i => cell(result.sales[i], v => h.fmt(v, 0))), "strong"]);
@@ -600,7 +605,7 @@
       rows.push(["Free cash flow, SEK m", cols.map(i => cell(result.fcf[i], v => h.fmt(v, 0))), "strong"]);
       const inp = data.inputs, tv = String(inp.method || "").toLowerCase() === "terminal growth" ? `terminal growth ${pctf(inp.growth)}` : `exit multiple ${h.fmt(inp.multiple, 1)}x EV/EBITDA`;
       html += `<section class="card cp-chart"><h2>Key assumptions</h2><p class="sub">From your model. WACC ${pctf(inp.wacc)}, ${tv}.</p>
-        <div class="tbl-scroll"><table class="assump"><thead><tr><th>SEK m / %</th>${cols.map(i => `<th>${h.esc(P[i].label)}</th>`).join("")}</tr></thead>
+        <div class="tbl-scroll"><table class="assump"><thead><tr><th>SEK m / %</th>${cols.map(i => `<th class="${out.has(i) ? "outdated" : ""}">${h.esc(P[i].label)}${out.has(i) ? `<small>Outdated values · actuals reported ${h.esc(h.fmtDate(lr.date).replace(/ \d{4}$/, ""))}</small>` : ""}</th>`).join("")}</tr></thead>
         <tbody>${rows.map(([lab, cells, cls]) => `<tr class="${cls || ""}"><th>${lab}</th>${cells.join("")}</tr>`).join("")}</tbody></table></div></section>`;
       return html;
       });
@@ -619,11 +624,11 @@
         const prev = versions[i + 1], ch = prev && prev.valuePerShare ? v.valuePerShare / prev.valuePerShare - 1 : null;
         return `<tr><td>${day(v.uploadedAt)}</td><td>${h.esc(v.basis || "–")}</td><td>${nf(v.valuePerShare)}</td>
         <td>${ch == null ? "<span class='dim'>first</span>" : `<span class="${ch >= 0 ? "pos" : "neg"}">${h.pct(ch)}</span>`}</td>
-        <td class="file">${v.auto ? `<span class="auto-badge">Auto</span>Mr. Market update` : h.esc(v.fileName)}${v.note ? `<small class="vnote">${h.esc(v.note)}${v.auto && v.reviewed ? " · reviewed, assumptions kept" : ""}</small>` : ""}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
+        <td class="file">${v.applied ? `<span class="auto-badge">Actuals applied</span>` : ""}${h.esc(v.fileName)}${v.note ? `<small class="vnote">${h.esc(v.note)}</small>` : ""}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
       }).join("")}</tbody></table></div></section>`;
     } return html; });
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.25", render, updateValuation, impliedWacc, fvaPopup };
+  window.MMCompany = { VERSION: "0.26", render, updateValuation, impliedWacc, fvaPopup };
 })();

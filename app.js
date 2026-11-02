@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.25";
+const APP_VERSION="0.26";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */
@@ -402,7 +402,7 @@ let chartMetric="sales"; const WACC_OVERRIDE={};
 const safeT=t=>t.replace(/\s+/g,"-");
 const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
 function latestModel(t){return MODEL_INDEX.find(m=>m.ticker===t&&!m.hidden)||null}
-const LATEST_TEMPLATE="1.1";
+const LATEST_TEMPLATE="1.2";
 async function loadModels(){
   if(!gh.token){MODEL_INDEX=[];TEMPLATES=new Set();DS.models="idle";renderAll();return}
   DS.models="loading"; DS.modelsErr=""; renderAll();
@@ -413,9 +413,8 @@ async function loadModels(){
     else{
       let d; try{d=JSON.parse(await r.text())}catch(e){throw new Error("models/index.json is not valid JSON.")}
       const list=Array.isArray(d&&d.models)?d.models:[];
-      MODEL_INDEX=list.filter(m=>m&&m.ticker&&m.json&&m.xlsx)
-        .map(m=>Object.assign({uploadedAt:"",basis:"",fileName:"Model",valuePerShare:null},m))
-        .sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
+      MODEL_INDEX=cleanIndex(list.filter(m=>m&&m.ticker&&m.json&&m.xlsx)
+        .map(m=>Object.assign({uploadedAt:"",basis:"",fileName:"Model",valuePerShare:null},m)));
     }
     DS.models="ok";
   }catch(e){DS.models="error";DS.modelsErr=netErr(e);console.error("loadModels",e)}
@@ -431,7 +430,6 @@ async function loadModels(){
     DS.templatesErr="";
   }catch(e){DS.templatesErr=netErr(e);console.error("templates",e)}
   renderAll();
-  if(DS.models==="ok") rollAll();
 }
 const b64bytes=buf=>{const u8=new Uint8Array(buf);let s="";for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)};
 const b64text=str=>b64bytes(new TextEncoder().encode(str));
@@ -486,7 +484,6 @@ async function ensureActuals(t){
     else if(!r.ok) throw new Error(httpErr(r.status));
     else ACTUALS[t]=await MMModels.readActuals(await r.arrayBuffer());
     delete ACT_ERR[t];
-    setTimeout(()=>maybeRoll(t),0);
   }catch(e){ACT_ERR[t]=netErr(e);RETRY_AT["A:"+t]=Date.now()+20000;console.error("actuals",e)}
   finally{LOADING.delete("A:"+t)}
   if(currentCompany===t) renderCompany();
@@ -502,6 +499,24 @@ async function ensureModelData(t,path){
   }catch(e){MODEL_ERR[path]=netErr(e);RETRY_AT[path]=Date.now()+20000;console.error("model",e)}
   finally{LOADING.delete(path)}
   if(currentCompany===t) renderCompany();
+}
+// the downloadable transfer sheet always carries the latest reported quarter (history + balance sheet)
+async function downloadTemplate(t){
+  const path=`templates/${safeT(t)}_transfer_sheet.xlsx`, name=`${safeT(t)}_transfer_sheet.xlsx`;
+  const r=await ghApi("/contents/"+encPath(path),{headers:{Accept:"application/vnd.github.raw+json"}});
+  if(!r.ok) throw new Error(r.status===404?"No transfer sheet for this company yet":httpErr(r.status));
+  let blob=new Blob([await r.arrayBuffer()]);
+  try{
+    if(ACTUALS[t]===undefined) await ensureActuals(t);
+    const A=ACTUALS[t];
+    if(A&&A.quarterly){
+      const buf=await blob.arrayBuffer(), parsed=await MMModels.parseTransferSheet(buf,null), cur=parsed.model&&parsed.model.basis;
+      const lastQ=A.quarterly.periods.filter(Q=>qIndex(Q)!=null&&A.quarterly.value("net sales",Q)!=null).pop();
+      if(cur&&lastQ&&qIndex(lastQ)>qIndex(cur)&&+lastQ[1]!==4){const ed=await MMModels.applyQuarterToSheet(buf,A,lastQ); if(ed.bytes) blob=ed.bytes}
+    }
+  }catch(e){console.error("template refresh",e)}
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
 }
 function retryLoads(){
   for(const k in ACT_ERR) delete ACT_ERR[k];
@@ -527,10 +542,13 @@ function comparisonFor(t){
   const selected=FVA_Q[t]&&list.some(x=>x.quarter===FVA_Q[t])?FVA_Q[t]:(list[0]&&list[0].quarter);
   const sel=list.find(x=>x.quarter===selected);
   if(sel&&!MODEL_DATA[sel.version.json]) ensureModelData(t,sel.version.json);
-  let bridge=null;
-  if(sel){const au=MODEL_INDEX.find(m=>m.ticker===t&&m.auto&&m.rolledFrom===sel.version.json&&m.basis===sel.quarter);
-    if(au){const d=MODEL_DATA[au.json]; if(d) bridge=d.valueBridge||null; else ensureModelData(t,au.json)}}
-  return {list,selected,data:sel?MODEL_DATA[sel.version.json]||null:null,bridge};
+  let bridge=null, preview=false;
+  if(sel){
+    const ap=MODEL_INDEX.find(m=>m.ticker===t&&m.applied&&m.appliedFrom===sel.version.json&&m.basis===sel.quarter);
+    if(ap){const d=MODEL_DATA[ap.json]; if(d) bridge=d.valueBridge||null; else ensureModelData(t,ap.json)}
+    else if(MODEL_DATA[sel.version.json]){const r=MMModels.rollForward(MODEL_DATA[sel.version.json],A,sel.quarter); if(!r.error){bridge=r.model.valueBridge;preview=true}}
+  }
+  return {list,selected,data:sel?MODEL_DATA[sel.version.json]||null:null,bridge,preview};
 }
 function companyCtx(){
   const t=currentCompany, lm=latestModel(t), data=lm?MODEL_DATA[lm.json]:null;
@@ -538,7 +556,7 @@ function companyCtx(){
   return {s:info(t),connected:!!gh.token,hasTemplate:TEMPLATES.has(safeT(t)),
     versions:MODEL_INDEX.filter(m=>m.ticker===t&&!m.hidden),latest:lm,data,result,actuals:ACTUALS[t]||null,hasActuals:!!ACTUALS[t],metric:chartMetric,
     wacc:lm?WACC_OVERRIDE[lm.json]:undefined,h:{fmt,pct,esc,fmtDate,flag,daysTo},
-    comparison:comparisonFor(t),
+    comparison:comparisonFor(t), apply:applyPreview(t),
     status:{models:DS.models,modelsErr:DS.modelsErr,actualsErr:ACT_ERR[t]||"",modelDataErr:lm?MODEL_ERR[lm.json]||"":""}};
 }
 function renderCompany(){
@@ -570,13 +588,13 @@ $("view-company").addEventListener("click",async e=>{
   const t=currentCompany, a=b.dataset.action;
   try{
     if(a==="upload"){openUpload(t)}
-    else if(a==="download-template"){toast("Downloading…");await downloadPath(`templates/${safeT(t)}_transfer_sheet.xlsx`,`${safeT(t)}_transfer_sheet.xlsx`)}
+    else if(a==="download-template"){toast("Downloading…");await downloadTemplate(t)}
     else if(a==="download-model"){const lm=latestModel(t);toast("Downloading…");await downloadPath(lm.xlsx,lm.fileName)}
     else if(a==="download-version"){toast("Downloading…");await downloadPath(b.dataset.path,b.dataset.name)}
     else if(a==="download-actuals"){toast("Downloading…");await downloadPath(actualsPath(t),`${safeT(t)}_historical_financials.xlsx`)}
     else if(a==="metric"){chartMetric=b.dataset.metric;renderCompany()}
     else if(a==="fva-q"){FVA_Q[t]=b.dataset.q;renderCompany()}
-    else if(a==="keep"){const lm=latestModel(t);if(lm){b.disabled=true;await updateIndexEntry(lm.json,{reviewed:true,reviewedAt:new Date().toISOString()},`Reviewed ${lm.basis}: assumptions kept (${t})`);toast("Assumptions kept")}}
+    else if(a==="apply-actuals"){b.disabled=true;b.textContent="Applying…";try{await applyActuals(t)}catch(err){b.disabled=false;toast(err.message||String(err));renderCompany()}}
     else if(a==="fva-pop"){const p=MMCompany.fvaPopup(b.dataset.cat,companyCtx());
       if(!p){toast("Not available for this quarter");return}
       $("fva-t").textContent=p.title;$("fva-body").innerHTML=p.html;openDlg("dlg-fva")}
@@ -622,7 +640,7 @@ async function handleFile(file){
     const res=await MMModels.parseTransferSheet(buf,null);
     const detected=resolveTicker(res.model&&res.model.ticker,file.name);
     Object.assign(pending,{file,buf,res,detected,t:detected||pending.expected,choosing:!(detected||pending.expected)});
-    if(pending.t) ensureActuals(pending.t);
+    if(pending.t){try{await ensureActuals(pending.t)}catch(e){}}
     renderReview();
   }catch(err){$("review-body").innerHTML=`<div class="warn"><b>Could not read the file.</b> ${esc(err.message||String(err))}</div>
     <div class="actions"><button class="pill" id="rv-again">Choose another file</button><button class="pill" data-close>Close</button></div>`;
@@ -643,6 +661,14 @@ function renderReview(){
   if(t){
     if(P.detected&&P.detected!==t) warn.unshift(`The transfer sheet says ${P.detected}, but you are saving it for ${t}.`);
     const sc=shareCheck(t,res); if(sc) warn.unshift(sc);
+    const lr=s&&s.lastReport;
+    if(res.model&&lr&&qIndex(lr.quarter)>qIndex(res.model.basis)) warn.unshift(`${lr.quarter} has been reported, but your sheet still says ${res.model.basis} as the latest reported quarter.`);
+    if(res.model&&ACTUALS[t]){
+      const ch=MMModels.compareHistory(res.model,ACTUALS[t]);
+      ch.diffs.slice(0,6).forEach(d=>warn.push(d));
+      if(ch.diffs.length>6) warn.push(`…and ${ch.diffs.length-6} more differences in the history`);
+      if(ch.stale||ch.empty) ok.push("Mr. Market fills in the reported quarters when you save");
+    }
   }
   if(!bad.length){
     ok.push("Transfer sheet found and all forecast cells are filled");
@@ -680,7 +706,7 @@ function renderReview(){
       const hits=UNIVERSE.filter(([tt,n])=>!q||(n+" "+tt).toLowerCase().includes(q)).slice(0,8);
       $("rv-results").innerHTML=hits.map(([tt,n])=>`<button class="rv-hit" data-co="${esc(tt)}">${flag(info(tt).country)}<span><b>${esc(n)}</b> <span class="dim">${esc(tt)}</span></span></button>`).join("")||`<p class="dim small">No match</p>`;};
     se.oninput=list; list();
-    $("rv-results").onclick=e=>{const b=e.target.closest("[data-co]");if(!b)return;P.t=b.dataset.co;P.choosing=false;ensureActuals(P.t);renderReview()};
+    $("rv-results").onclick=async e=>{const b=e.target.closest("[data-co]");if(!b)return;P.t=b.dataset.co;P.choosing=false;try{await ensureActuals(P.t)}catch(err){}renderReview()};
   }
   const btn=$("rv-save"); if(btn) btn.onclick=saveModel;
 }
@@ -692,8 +718,17 @@ async function saveModel(){
     const base=`models/${safeT(t)}/${stamp}`, safeName=file.name.replace(/[^\w.\-]+/g,"_");
     const xlsxPath=`${base}_${safeName}`, jsonPath=`${base}.json`;
     const msg=`Upload model ${t} (${res.model.basis||"no basis"})`;
-    await putFile(xlsxPath,b64bytes(buf),msg);
-    const data=Object.assign({},res.model,{ticker:t,fileName:file.name,uploadedAt:now.toISOString()});
+    // template 1.2: fill in the history (reported quarters) from Mr. Market's data
+    let fileBuf=buf, model=res.model;
+    const A=ACTUALS[t];
+    if(A&&model.periods.some(p=>String(p.status).toLowerCase()==="actual")&&A.quarterly.value("net sales",model.basis)!=null){
+      try{
+        const ed=await MMModels.applyQuarterToSheet(buf,A,model.basis,{historyOnly:true,onlyEmpty:true});
+        if(ed.bytes){fileBuf=await ed.bytes.arrayBuffer(); model=MMModels.refreshHistory(JSON.parse(JSON.stringify(model)),A,model.basis)}
+      }catch(e){console.error("history fill",e)}
+    }
+    await putFile(xlsxPath,b64bytes(fileBuf),msg);
+    const data=Object.assign({},model,{ticker:t,fileName:file.name,uploadedAt:now.toISOString()});
     await putFile(jsonPath,b64text(JSON.stringify(data)),msg);
     const idx=await getJson("models/index.json");
     const list=(idx.data&&idx.data.models)||[];
@@ -703,49 +738,58 @@ async function saveModel(){
       note:note||null,priceAtUpload:s&&s.price!=null?s.price:null,priceDate:s&&s.priceDate||null};
     list.unshift(entry);
     await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
-    MODEL_INDEX=list.sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt))); MODEL_DATA[jsonPath]=data; DS.models="ok";
+    MODEL_INDEX=cleanIndex(list); MODEL_DATA[jsonPath]=data; DS.models="ok";
     closeAll(); toast(`Model saved for ${s.name}: ${fmt(entry.valuePerShare)} per share`);
     try{renderAll()}catch(e){console.error(e)}
   }catch(err){btn.disabled=false;btn.textContent="Save model";toast(err.message)}
 }
 
-/* ---------- automatic roll-forward with new actuals (step 3) ----------
-   When the historical file has the quarter after your latest model, Mr. Market applies it to a copy of the
-   model and saves it as a new version. Your own uploads and Excel files are never changed. */
-const ROLLING=new Set();
+/* ---------- apply a reported quarter to your model (option 2) ----------
+   Only Mr. Market's own cells change: the quarter becomes reported, the history rolls forward and the
+   balance sheet moves to the quarter end. Your own DCF sheets and all forecasts stay as they are. */
 const qLabel=n=>`Q${((n-1)%4)+1} ${Math.floor((n-1)/4)}`;
-async function maybeRoll(t){
-  if(!gh.token||DS.models!=="ok"||ROLLING.has(t)) return;
-  const lm=latestModel(t), A=ACTUALS[t];
-  if(!lm||!A||!A.quarterly||qIndex(lm.basis)==null) return;
-  const Q=qLabel(qIndex(lm.basis)+1);
-  if(A.quarterly.value("net sales",Q)==null) return;
-  if(MODEL_INDEX.some(m=>m.ticker===t&&m.rolledFrom===lm.json&&m.basis===Q)) return;
-  ROLLING.add(t);
-  try{
-    let data=MODEL_DATA[lm.json];
-    if(!data){const r=await getJson(lm.json);data=r.data;if(!data)return;MODEL_DATA[lm.json]=data}
-    const r=MMModels.rollForward(data,A,Q);
-    if(r.error){console.warn("roll-forward",t,r.error);return}
-    const now=new Date(), stamp=now.toISOString().replace(/[-:]/g,"").slice(0,15);
-    const jsonPath=`models/${safeT(t)}/${stamp}_auto.json`, msg=`${Q} actuals added by Mr. Market (${t})`;
-    const note=`${Q} actuals added by Mr. Market`;
-    const data2=Object.assign(r.model,{ticker:t,fileName:lm.fileName,uploadedAt:now.toISOString(),auto:true,rolledFrom:lm.json});
-    await putFile(jsonPath,b64text(JSON.stringify(data2)),msg);
-    const idx=await getJson("models/index.json"), list=(idx.data&&idx.data.models)||[];
-    if(list.some(m=>m.ticker===t&&m.rolledFrom===lm.json&&m.basis===Q)) return;      // another device was quicker
-    const s0=info(t);
-    list.unshift({ticker:t,uploadedAt:now.toISOString(),basis:Q,valuePerShare:+r.result.vps.toFixed(4),fileName:lm.fileName,xlsx:lm.xlsx,json:jsonPath,
-      templateVersion:lm.templateVersion||null,note,auto:true,rolledFrom:lm.json,reviewed:false,priceAtUpload:s0&&s0.price!=null?s0.price:null,priceDate:s0&&s0.priceDate||null});
-    await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
-    MODEL_INDEX=list.sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt))); MODEL_DATA[jsonPath]=data2;
-    toast(`${Q} actuals added to your ${s0?s0.name:t} model`);
-    renderAll();
-    setTimeout(()=>maybeRoll(t),50);          // more quarters waiting? apply them one by one
-  }catch(e){console.error("roll-forward",e)}
-  finally{ROLLING.delete(t)}
+function nextQuarterFor(lm){return lm&&qIndex(lm.basis)!=null?qLabel(qIndex(lm.basis)+1):null}
+function applyPreview(t){
+  const lm=latestModel(t), A=ACTUALS[t], data=lm&&MODEL_DATA[lm.json];
+  if(!lm||!A||!A.quarterly||!data) return null;
+  const Q=nextQuarterFor(lm), s0=info(t), lr=s0&&s0.lastReport;
+  if(!lr||qIndex(lr.quarter)<qIndex(Q)) return null;                    // nothing reported yet
+  if(A.quarterly.value("net sales",Q)==null) return {quarter:Q,error:`${Q} figures are not in Mr. Market yet`};
+  const r=MMModels.rollForward(data,A,Q);
+  if(r.error) return {quarter:Q,error:r.error,yearEnd:!!r.yearEnd};
+  return {quarter:Q,from:lm.valuePerShare,to:r.result.vps};
 }
-function rollAll(){new Set(MODEL_INDEX.map(m=>m.ticker)).forEach(t=>{if(ACTUALS[t]!==undefined)maybeRoll(t);else ensureActuals(t)})}
+async function applyActuals(t){
+  const lm=latestModel(t), A=ACTUALS[t], data=lm&&MODEL_DATA[lm.json];
+  if(!lm||!A||!data) throw new Error("Your model is not loaded yet");
+  const Q=nextQuarterFor(lm), r=MMModels.rollForward(data,A,Q);
+  if(r.error) throw new Error(r.error);
+  // the Excel file: update the transfer sheet (Mr. Market's cells only)
+  let bytes=null, fileIssue="";
+  try{
+    const raw=await ghApi("/contents/"+encPath(lm.xlsx),{headers:{Accept:"application/vnd.github.raw+json"}});
+    if(!raw.ok) throw new Error(httpErr(raw.status));
+    const ed=await MMModels.applyQuarterToSheet(await raw.arrayBuffer(),A,Q);
+    if(ed.error) fileIssue=ed.error; else bytes=ed.bytes;
+  }catch(e){fileIssue=netErr(e)}
+  const now=new Date(), stamp=now.toISOString().replace(/[-:]/g,"").slice(0,15), base=`models/${safeT(t)}/${stamp}`;
+  const msg=`${Q} actuals applied by Mr. Market (${t})`;
+  let xlsxPath=lm.xlsx;
+  if(bytes){xlsxPath=`${base}_${lm.fileName.replace(/[^\w.\-]+/g,"_")}`;await putFile(xlsxPath,b64bytes(await bytes.arrayBuffer()),msg)}
+  const jsonPath=`${base}.json`;
+  const data2=Object.assign(r.model,{ticker:t,fileName:lm.fileName,uploadedAt:now.toISOString(),applied:true,appliedFrom:lm.json});
+  await putFile(jsonPath,b64text(JSON.stringify(data2)),msg);
+  const idx=await getJson("models/index.json"), list=(idx.data&&idx.data.models)||[], s0=info(t);
+  const note=`${Q} actuals applied by Mr. Market. Your own DCF sheets are unchanged`+(bytes?"":` (the Excel file could not be updated: ${fileIssue})`);
+  list.unshift({ticker:t,uploadedAt:now.toISOString(),basis:Q,valuePerShare:+r.result.vps.toFixed(4),fileName:lm.fileName,xlsx:xlsxPath,json:jsonPath,
+    templateVersion:lm.templateVersion||null,note,applied:true,appliedFrom:lm.json,priceAtUpload:s0&&s0.price!=null?s0.price:null,priceDate:s0&&s0.priceDate||null});
+  await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
+  MODEL_INDEX=cleanIndex(list); MODEL_DATA[jsonPath]=data2;
+  toast(`${Q} actuals applied: ${fmt(r.result.vps)} per share`+(bytes?"":" (Excel file unchanged)"));
+  renderAll();
+}
+// versions created automatically by version 0.25 are no longer used
+const cleanIndex=list=>list.filter(m=>!(m.auto&&!m.applied)).sort((a,b)=>String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
 
 /* ---------- index updates: notes and hidden versions (a few bytes in models/index.json) ---------- */
 async function updateIndexEntry(jsonPath,patch,message){
@@ -763,11 +807,10 @@ const MM={filter:"all",open:new Set(),showHidden:new Set(),editing:null};
 function modelStatus(entry,s){
   const bq=qIndex(entry.basis);
   if(bq==null) return {kind:"unknown",text:"Status unknown",short:"Status unknown"};
-  if(entry.auto&&!entry.reviewed) return {kind:"update",text:`${entry.basis} actuals added by Mr. Market · not reviewed`,short:`${entry.basis.split(" ")[0]} actuals added · not reviewed`};
   const lr=s&&s.lastReport, nr=s&&s.nextReportInfo;
   if(lr&&qIndex(lr.quarter)>bq){
     if(entry.reviewedQuarter===lr.quarter) return {kind:"ok",text:`${lr.quarter} reviewed · assumptions kept`,short:`Reviewed ${lr.quarter}`};
-    return {kind:"update",text:`${lr.quarter} reported ${fmtDate(lr.date)} · your model is based on ${entry.basis}`,short:`${lr.quarter.split(" ")[0]} reported · not reviewed`};
+    return {kind:"update",text:`${lr.quarter} reported ${fmtDate(lr.date)} · your model is based on ${entry.basis}`,short:`${lr.quarter.split(" ")[0]} reported · model not updated`};
   }
   if(nr){const n=daysTo(nr.date);return {kind:"ok",text:`Up to date · ${nr.quarter} report in ${n} day${n===1?"":"s"}`,short:`Based on ${entry.basis}`}}
   // no report dates known: estimate from the calendar (reports come within ~2 months of quarter end)
@@ -826,7 +869,7 @@ function versionsHtml(r){
     const editing=MM.editing===m.json;
     const d=new Date(m.uploadedAt);
     return `<tr class="${m.hidden?"is-hidden":""}"><td>${isNaN(d)?"–":d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}<small>${isNaN(d)?"":d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}</small></td>
-      <td class="fn">${m.auto?`<span class="auto-badge">Auto</span>`:""}${esc(m.auto?"Mr. Market update":m.fileName)}</td><td>${esc(m.basis||"–")}</td>
+      <td class="fn">${m.applied?`<span class="auto-badge">Actuals applied</span>`:""}${esc(m.fileName)}</td><td>${esc(m.basis||"–")}</td>
       <td class="r">${m.valuePerShare!=null?fmt(m.valuePerShare):"–"}${ch!=null&&!m.hidden?` <small class="${ch>=0?"pos":"neg"}">${pct(ch)}</small>`:""}</td>
       <td class="note-cell">${editing?`<input class="field" id="note-input" maxlength="200" value="${esc(m.note||"")}"><span class="note-act"><button class="link-btn" data-mm="note-save" data-path="${esc(m.json)}">Save</button><button class="link-btn" data-mm="note-cancel">Cancel</button></span>`
         :`${m.note?esc(m.note):`<span class="dim">No note</span>`} <button class="link-btn sm" data-mm="note-edit" data-path="${esc(m.json)}">${m.note?"Edit":"Add note"}</button>`}</td>

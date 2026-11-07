@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.26";
+const APP_VERSION="0.27";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */
@@ -662,7 +662,10 @@ function renderReview(){
     if(P.detected&&P.detected!==t) warn.unshift(`The transfer sheet says ${P.detected}, but you are saving it for ${t}.`);
     const sc=shareCheck(t,res); if(sc) warn.unshift(sc);
     const lr=s&&s.lastReport;
-    if(res.model&&lr&&qIndex(lr.quarter)>qIndex(res.model.basis)) warn.unshift(`${lr.quarter} has been reported, but your sheet still says ${res.model.basis} as the latest reported quarter.`);
+    P.behind=res.model?quartersBehind(t,res.model):{list:[]};
+    if(P.applyOn==null) P.applyOn=true;
+    if(P.behind.yearEnd&&!P.behind.list.length) warn.unshift(`${P.behind.yearEnd} (year-end) has been reported. Update your sheet to the new year's quarters before uploading.`);
+    else if(res.model&&lr&&qIndex(lr.quarter)>qIndex(res.model.basis)&&!P.behind.list.length) warn.unshift(`${lr.quarter} has been reported, but your sheet still says ${res.model.basis} as the latest reported quarter.`);
     if(res.model&&ACTUALS[t]){
       const ch=MMModels.compareHistory(res.model,ACTUALS[t]);
       ch.diffs.slice(0,6).forEach(d=>warn.push(d));
@@ -672,7 +675,7 @@ function renderReview(){
   }
   if(!bad.length){
     ok.push("Transfer sheet found and all forecast cells are filled");
-    if(res.model.sheet&&res.model.sheet.vps!=null&&!warn.some(w=>w.startsWith("The sheet's own value"))) ok.push(`Value per share matches the sheet (${fmt(res.model.sheet.vps)})`);
+    if(res.model.sheet&&res.model.sheet.vps!=null&&!warn.some(w=>w.startsWith("The sheet's own value"))) ok.push(`Value per share matches the sheet (${fmt(res.model.sheet.vps)}${P.behind&&P.behind.list.length&&P.applyOn?", before applying the actuals":""})`);
   }
   let h=`<p class="rv-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${esc(file.name)}</b><br><span class="dim small">${res.model&&res.model.basis?"Based on "+esc(res.model.basis):""}${res.model&&res.model.templateVersion?" · template "+esc(res.model.templateVersion):""}</span></span></p>`;
   // company confirmation, with a simple way to change it
@@ -684,9 +687,18 @@ function renderReview(){
       <input class="field" id="rv-search" type="search" placeholder="Search company or ticker" autocomplete="off">
       <div id="rv-results" class="rv-results"></div></div>`;
   }
-  if(r&&t){
-    const up=s.price?r.vps/s.price-1:null;
-    h+=`<div class="rv-stats"><div><small>Your value</small><b>${fmt(r.vps)}</b></div><div><small>Share price</small><b>${s.price!=null?fmt(s.price):"–"}</b></div>
+  const applying=t&&P.behind&&P.behind.list.length&&P.applyOn;
+  if(t&&P.behind&&P.behind.list.length){
+    const ql=P.behind.list.join(" and ");
+    h+=`<label class="rv-apply"><input type="checkbox" id="rv-apply" ${P.applyOn?"checked":""}><span><b>Apply ${esc(ql)} actuals to this file</b> <span class="dim">(recommended)</span><br>
+      <span class="dim small">This file is based on ${esc(res.model.basis)}. Mr. Market fills in the reported figures and the balance sheet; your forecasts stay as they are</span></span></label>`;
+  }
+  if(t&&P.behind&&P.behind.list.length&&!P.applyOn) warn.unshift(`${P.behind.list[P.behind.list.length-1]} has been reported. Without applying the actuals, this model stays based on ${res.model.basis}.`);
+  let rv=r;
+  if(applying){const ch=rollChain(res.model,ACTUALS[t],P.behind.list); if(!ch.error) rv=ch.result}
+  if(rv&&t){
+    const r=rv, up=s.price?r.vps/s.price-1:null;
+    h+=`<div class="rv-stats"><div><small>Your value${applying?` (incl. ${esc(P.behind.list[P.behind.list.length-1].split(" ")[0])})`:""}</small><b>${fmt(r.vps)}</b></div><div><small>Share price</small><b>${s.price!=null?fmt(s.price):"–"}</b></div>
       <div><small>Upside</small><b class="${up==null?"":up>=0?"pos":"neg"}">${up==null?"–":pct(up)}</b></div>
       <div><small>vs last version</small><b>${prev&&prev.valuePerShare?`<span class="${r.vps>=prev.valuePerShare?"pos":"neg"}">${pct(r.vps/prev.valuePerShare-1)}</span>`:"<span class='dim'>first</span>"}</b></div></div>`;
   }
@@ -698,6 +710,7 @@ function renderReview(){
     <div class="actions"><button class="pill" id="rv-other">Choose another file</button><button class="pill" data-close>Cancel</button><button class="pill primary" id="rv-save" ${canSave?"":"disabled"}>Save model</button></div>`;
   $("review-body").innerHTML=h;
   $("rv-note").oninput=e=>{P.note=e.target.value};
+  const ap=$("rv-apply"); if(ap) ap.onchange=()=>{P.note=$("rv-note").value;P.applyOn=ap.checked;renderReview()};
   $("rv-other").onclick=()=>{P.note=$("rv-note").value;renderPick()};
   const ch=$("rv-change"); if(ch) ch.onclick=()=>{P.choosing=true;renderReview();$("rv-search").focus()};
   const se=$("rv-search");
@@ -718,13 +731,30 @@ async function saveModel(){
     const base=`models/${safeT(t)}/${stamp}`, safeName=file.name.replace(/[^\w.\-]+/g,"_");
     const xlsxPath=`${base}_${safeName}`, jsonPath=`${base}.json`;
     const msg=`Upload model ${t} (${res.model.basis||"no basis"})`;
-    // template 1.2: fill in the history (reported quarters) from Mr. Market's data
-    let fileBuf=buf, model=res.model;
+    let fileBuf=buf, model=res.model, result=res.result, autoNote="";
     const A=ACTUALS[t];
-    if(A&&model.periods.some(p=>String(p.status).toLowerCase()==="actual")&&A.quarterly.value("net sales",model.basis)!=null){
+    if(A&&P.applyOn&&P.behind&&P.behind.list.length){
+      // the file is behind: apply the reported quarters (Mr. Market's cells only)
+      const ch=rollChain(model,A,P.behind.list);
+      if(ch.error) throw new Error(ch.error);
+      model=ch.model; result=ch.result;
+      let fileIssue="";
+      for(const Q of P.behind.list){
+        const ed=await MMModels.applyQuarterToSheet(fileBuf,A,Q);
+        if(ed.error){fileIssue=ed.error;break}
+        if(ed.bytes) fileBuf=await ed.bytes.arrayBuffer();
+      }
+      autoNote=`${P.behind.list.join(" and ")} actuals applied by Mr. Market on upload`+(fileIssue?` (the Excel file could not be updated: ${fileIssue})`:"");
+      if(fileIssue) fileBuf=buf;
+    } else if(A&&model.periods.some(p=>String(p.status).toLowerCase()==="actual")&&A.quarterly.value("net sales",model.basis)!=null){
+      // template 1.2 at the latest quarter: fill in empty reported cells and Mr. Market's balance sheet
       try{
-        const ed=await MMModels.applyQuarterToSheet(buf,A,model.basis,{historyOnly:true,onlyEmpty:true});
-        if(ed.bytes){fileBuf=await ed.bytes.arrayBuffer(); model=MMModels.refreshHistory(JSON.parse(JSON.stringify(model)),A,model.basis)}
+        const ed=await MMModels.applyQuarterToSheet(buf,A,model.basis,{historyOnly:true});
+        if(ed.bytes){
+          fileBuf=await ed.bytes.arrayBuffer();
+          model=MMModels.refreshHistory(JSON.parse(JSON.stringify(model)),A);
+          if(ed.bsChanged&&Object.keys(ed.bsChanged).length){Object.assign(model.inputs,ed.bsChanged); result=MMModels.computeValuation(model)}
+        }
       }catch(e){console.error("history fill",e)}
     }
     await putFile(xlsxPath,b64bytes(fileBuf),msg);
@@ -733,9 +763,9 @@ async function saveModel(){
     const idx=await getJson("models/index.json");
     const list=(idx.data&&idx.data.models)||[];
     const s=info(t), note=String(P.note||"").trim();
-    const entry={ticker:t,uploadedAt:now.toISOString(),basis:res.model.basis,valuePerShare:+res.result.vps.toFixed(4),
+    const entry={ticker:t,uploadedAt:now.toISOString(),basis:model.basis,valuePerShare:+result.vps.toFixed(4),
       fileName:file.name,xlsx:xlsxPath,json:jsonPath,templateVersion:res.model.templateVersion||null,
-      note:note||null,priceAtUpload:s&&s.price!=null?s.price:null,priceDate:s&&s.priceDate||null};
+      note:[note,autoNote].filter(Boolean).join(" · ")||null,priceAtUpload:s&&s.price!=null?s.price:null,priceDate:s&&s.priceDate||null};
     list.unshift(entry);
     await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);
     MODEL_INDEX=cleanIndex(list); MODEL_DATA[jsonPath]=data; DS.models="ok";
@@ -749,6 +779,22 @@ async function saveModel(){
    balance sheet moves to the quarter end. Your own DCF sheets and all forecasts stay as they are. */
 const qLabel=n=>`Q${((n-1)%4)+1} ${Math.floor((n-1)/4)}`;
 function nextQuarterFor(lm){return lm&&qIndex(lm.basis)!=null?qLabel(qIndex(lm.basis)+1):null}
+function quartersBehind(t,model){
+  const s0=info(t), lr=s0&&s0.lastReport, A=ACTUALS[t], out={list:[],yearEnd:null};
+  if(!lr||!A||!A.quarterly||qIndex(model.basis)==null) return out;
+  for(let q=qIndex(model.basis)+1;q<=qIndex(lr.quarter);q++){
+    const Q=qLabel(q);
+    if(+Q[1]===4){out.yearEnd=Q;break}
+    if(A.quarterly.value("net sales",Q)==null) break;
+    out.list.push(Q);
+  }
+  return out;
+}
+function rollChain(model,A,list){
+  let m=model, r=null;
+  for(const Q of list){r=MMModels.rollForward(m,A,Q); if(r.error) return {error:r.error}; m=r.model}
+  return r?{model:m,result:r.result}:{model,result:MMModels.computeValuation(model)};
+}
 function applyPreview(t){
   const lm=latestModel(t), A=ACTUALS[t], data=lm&&MODEL_DATA[lm.json];
   if(!lm||!A||!A.quarterly||!data) return null;
@@ -765,12 +811,12 @@ async function applyActuals(t){
   const Q=nextQuarterFor(lm), r=MMModels.rollForward(data,A,Q);
   if(r.error) throw new Error(r.error);
   // the Excel file: update the transfer sheet (Mr. Market's cells only)
-  let bytes=null, fileIssue="";
+  let bytes=null, fileIssue="", replacedNote="";
   try{
     const raw=await ghApi("/contents/"+encPath(lm.xlsx),{headers:{Accept:"application/vnd.github.raw+json"}});
     if(!raw.ok) throw new Error(httpErr(raw.status));
     const ed=await MMModels.applyQuarterToSheet(await raw.arrayBuffer(),A,Q);
-    if(ed.error) fileIssue=ed.error; else bytes=ed.bytes;
+    if(ed.error) fileIssue=ed.error; else {bytes=ed.bytes; if(ed.replaced&&ed.replaced.length) replacedNote=`${ed.replaced.join(", ")} ${ed.replaced.length>1?"were":"was"} linked in your file and now shows the reported figure`}
   }catch(e){fileIssue=netErr(e)}
   const now=new Date(), stamp=now.toISOString().replace(/[-:]/g,"").slice(0,15), base=`models/${safeT(t)}/${stamp}`;
   const msg=`${Q} actuals applied by Mr. Market (${t})`;
@@ -780,7 +826,7 @@ async function applyActuals(t){
   const data2=Object.assign(r.model,{ticker:t,fileName:lm.fileName,uploadedAt:now.toISOString(),applied:true,appliedFrom:lm.json});
   await putFile(jsonPath,b64text(JSON.stringify(data2)),msg);
   const idx=await getJson("models/index.json"), list=(idx.data&&idx.data.models)||[], s0=info(t);
-  const note=`${Q} actuals applied by Mr. Market. Your own DCF sheets are unchanged`+(bytes?"":` (the Excel file could not be updated: ${fileIssue})`);
+  const note=`${Q} actuals applied by Mr. Market. Your own DCF sheets are unchanged`+(bytes?(replacedNote?`. ${replacedNote}`:""):` (the Excel file could not be updated: ${fileIssue})`);
   list.unshift({ticker:t,uploadedAt:now.toISOString(),basis:Q,valuePerShare:+r.result.vps.toFixed(4),fileName:lm.fileName,xlsx:xlsxPath,json:jsonPath,
     templateVersion:lm.templateVersion||null,note,applied:true,appliedFrom:lm.json,priceAtUpload:s0&&s0.price!=null?s0.price:null,priceDate:s0&&s0.priceDate||null});
   await putFile("models/index.json",b64text(JSON.stringify({schema:1,models:list},null,1)),msg,idx.sha);

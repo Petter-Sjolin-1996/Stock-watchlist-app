@@ -680,5 +680,5 @@
     catch (e) { return { error: e.message || String(e) }; }
   }
 
-  window.MMModels = { VERSION: "0.28", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward, refreshHistory, compareHistory, applyQuarterToSheet, quartersBack };
+  window.MMModels = { VERSION: "0.29", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward, refreshHistory, compareHistory, applyQuarterToSheet, quartersBack };
 })();

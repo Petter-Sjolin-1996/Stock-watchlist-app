@@ -633,5 +633,5 @@
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.27", render, updateValuation, impliedWacc, fvaPopup };
+  window.MMCompany = { VERSION: "0.28", render, updateValuation, impliedWacc, fvaPopup };
 })();

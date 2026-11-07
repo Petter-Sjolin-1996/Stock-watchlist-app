@@ -1,501 +1,637 @@
-:root{--mm-version:"0.27"}
-:root{
-  --bg:#F3F5F8; --surface:#FFFFFF; --ink:#16202A; --muted:#67727D; --line:#E2E6EB; --hover:#F6F8FB;
-  --blue:#1B5FAA; --blue-dark:#154C89; --blue-soft:#E7EFF9;
-  --up:#1E7A52; --up-soft:#E3F2EA; --down:#BF3B2F; --down-soft:#F9E5E2;
-  --amber:#9A6606; --amber-soft:#FBF1DD;
-  --s1:#1B5FAA; --s2:#8C5AC8; --s3:#D0782E; --s4:#1E7A52; --s5:#7F8C99;
-  --sans:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --serif:"Newsreader", Georgia, "Times New Roman", serif;
-  box-sizing:border-box;
-  padding-bottom:env(safe-area-inset-bottom,0px);
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#0E151C; --surface:#16202A; --ink:#E6EBF0; --muted:#97A3AE; --line:#25313D; --hover:#1B2733;
-    --blue:#7FB0EA; --blue-dark:#A5C8F2; --blue-soft:#1A2B3F;
-    --up:#5CC392; --up-soft:#153128; --down:#EE8A7E; --down-soft:#3A211E;
-    --amber:#E3B04F; --amber-soft:#382C15;
-    --s1:#7FB0EA; --s2:#B793E6; --s3:#E8A066; --s4:#5CC392; --s5:#8894A0;
+/* Mr. Market – company page (rendering only; app.js handles data and actions) */
+(function () {
+  "use strict";
+  const SEG_COLORS = ["#1B5FAA", "#5B8FD1", "#9CC0EA", "#7A4FB5", "#B79BDB", "#2E7D6B"];
+
+  function niceStep(v) {
+    if (v <= 0) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+    return 10 * p;
   }
-}
-:root[data-theme="dark"]{
-  --bg:#0E151C; --surface:#16202A; --ink:#E6EBF0; --muted:#97A3AE; --line:#25313D; --hover:#1B2733;
-  --blue:#7FB0EA; --blue-dark:#A5C8F2; --blue-soft:#1A2B3F;
-  --up:#5CC392; --up-soft:#153128; --down:#EE8A7E; --down-soft:#3A211E;
-  --amber:#E3B04F; --amber-soft:#382C15;
-  --s1:#7FB0EA; --s2:#B793E6; --s3:#E8A066; --s4:#5CC392; --s5:#8894A0;
-}
-html{scroll-padding-top:env(safe-area-inset-top,0px)}
-*,*::before,*::after{box-sizing:inherit}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.45;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
-button,input{font:inherit;color:inherit}
-button{cursor:pointer}
-:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:6px}
-.wrap{max-width:1180px;margin:0 auto;padding:22px 22px 70px}
-h1,h2,h3{font-family:var(--serif);font-weight:700;letter-spacing:-.005em;margin:0}
-.topbar{background:linear-gradient(90deg,#13307A 0%,#1D4C9E 45%,#3A82D2 80%,#4A9BE2 100%);color:#fff;padding-top:env(safe-area-inset-top,0px)}
-.topbar-inner{max-width:1180px;margin:0 auto;padding:18px 22px 20px;display:flex;align-items:center}
-.brand{font-family:var(--serif);font-size:30px;font-weight:700;letter-spacing:.005em;color:#fff}
-.nav{display:flex;gap:28px;margin:4px 0 26px;overflow-x:auto}
-.nav a{padding:6px 0 9px;color:var(--muted);text-decoration:none;white-space:nowrap;border-bottom:2.5px solid transparent;font-size:16px}
-.nav a[aria-current="page"]{color:var(--ink);border-color:var(--blue)}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:16px}
-.card + .card{margin-top:16px}
-.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:9px 18px;font-size:15px;white-space:nowrap}
-.pill:hover{background:var(--hover)}
-.pill[hidden]{display:none}
-.pill svg{width:17px;height:17px;flex:none}
-.pill.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-.pill.primary:hover{background:var(--blue-dark)}
-.pill.danger{color:var(--down);border-color:var(--down)}
-.pill.danger-solid{background:var(--down);border-color:var(--down);color:#fff}
-.icon-btn{border:0;background:none;padding:6px;border-radius:8px;color:var(--muted);display:inline-grid;place-items:center}
-.icon-btn:hover{background:var(--hover);color:var(--ink)}
-.icon-btn svg{width:19px;height:19px}
-.banner-top{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--line)}
-.banner-top h2{font-size:22px}
-.banner-bar{display:flex;align-items:center;gap:12px;padding:18px 24px;flex-wrap:wrap}
-.banner-bar .spacer{flex:1}
-.dd{position:relative}
-.menu{position:absolute;top:calc(100% + 6px);left:0;min-width:260px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(15,25,35,.12);padding:6px;z-index:20;display:none}
-.menu.open{display:block}
-.menu button{display:flex;width:100%;justify-content:space-between;gap:16px;border:0;background:none;padding:10px 12px;border-radius:8px;text-align:left}
-.menu button:hover{background:var(--hover)}
-.menu .cnt{color:var(--muted);font-size:13px}
-.menu .sel{color:var(--blue);font-weight:600}
-.search{position:relative;flex:0 1 380px;min-width:220px}
-.search input{width:100%;padding:10px 16px 10px 42px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
-.search input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
-.search > svg{position:absolute;left:15px;top:50%;width:17px;height:17px;margin-top:-8.5px;color:var(--muted)}
-.results{position:absolute;top:calc(100% + 6px);left:0;right:0;max-height:340px;overflow-y:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(15,25,35,.12);padding:6px;z-index:20;display:none}
-.results.open{display:block}
-.res{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:8px 10px;border-radius:8px}
-.res:hover{background:var(--hover)}
-.res small{display:block;color:var(--muted);font-size:12.5px}
-.res .in{font-size:13px;color:var(--muted)}
-.res .add-sm{border:1px solid var(--blue);color:var(--blue);background:none;border-radius:999px;padding:4px 12px;font-size:13px;font-weight:500}
-.seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px}
-.seg button{border:0;background:transparent;padding:6px 14px;border-radius:999px;font-size:14px;color:var(--muted)}
-.seg button[aria-pressed="true"]{background:var(--blue);color:#fff;font-weight:500}
-.sub{color:var(--muted);font-size:13.5px;margin:0 0 12px}
-.tbl-top{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-#unit-wrap[hidden]{display:none}
-.tbl-top h2{font-size:22px}
-.toggle-label{color:var(--muted);font-size:13.5px;margin-right:8px}
-table{width:100%;border-collapse:collapse}
-th,td{padding:14px 12px;text-align:right;white-space:nowrap}
-th:first-child,td:first-child{padding-left:24px;text-align:left}
-th:last-child,td:last-child{padding-right:16px}
-thead th{font-size:13.5px;font-weight:500;border-bottom:1px solid var(--line);padding-top:12px;padding-bottom:12px}
-th .sort{border:0;background:none;padding:3px 6px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;font-weight:500}
-th .sort:hover{background:var(--hover)}
-th .sort[aria-sort]{background:var(--blue-soft)}
-th .sort svg{width:10px;height:10px;color:var(--muted)}
-th .sort[aria-sort] svg{color:var(--blue)}
-tbody tr{border-bottom:1px solid var(--line);cursor:pointer}
-tbody tr:last-child{border-bottom:0}
-tbody tr:hover{background:var(--hover)}
-.name{display:flex;align-items:center;gap:12px}
-.flag{flex:none;width:20px;height:20px;border-radius:50%;overflow:hidden;display:inline-block;box-shadow:0 0 0 1px var(--line)}
-.flag svg{display:block;width:100%;height:100%}
-.tabs{display:flex;gap:4px;flex:1;margin-left:-18px}
-.tabs button{border:0;background:none;padding:10px 18px 12px;font-size:15.5px;color:var(--muted);border-bottom:2.5px solid transparent;margin-bottom:-19px}
-.tabs button[aria-selected="true"]{color:var(--ink);border-color:var(--blue);font-weight:500}
-tfoot td{font-weight:600;border-top:1px solid var(--line)}
-td.sticky,th.sticky{position:sticky;left:0;background:var(--surface);z-index:1}
-tbody tr:hover td.sticky{background:var(--hover)}
-.name a{color:var(--blue);text-decoration:none;font-weight:500}
-.name a:hover{text-decoration:underline}
-.name small{display:block;color:var(--muted);font-size:12.5px}
-.pos{color:var(--up)} .neg{color:var(--down)} .dim{color:var(--muted)}
-.up-cell{display:inline-flex;flex-direction:column;align-items:flex-end;gap:5px}
-.gap-bar{position:relative;width:90px;height:5px;border-radius:3px;background:var(--line)}
-.gap-bar span{position:absolute;top:0;bottom:0;border-radius:3px}
-.gap-bar::after{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--muted)}
-.status{font-size:12.5px;padding:4px 10px;border-radius:999px}
-.status.ok{background:var(--up-soft);color:var(--up)}
-.status.none{color:var(--muted);border:1px dashed var(--line)}
-.soon{color:var(--blue);font-weight:500}
-.empty-list{padding:40px 24px;text-align:center !important;color:var(--muted);white-space:normal}
-.add{display:flex;width:100%;justify-content:center;align-items:center;gap:8px;margin-top:14px;padding:16px;border:1.5px dashed var(--line);border-radius:16px;background:transparent;color:var(--blue);font-weight:500}
-.add:hover{background:var(--surface)}
-.foot{margin-top:28px;color:var(--muted);font-size:12.5px;max-width:75ch}
-.scrim{position:fixed;inset:0;background:rgba(10,18,26,.45);display:none;z-index:30}
-.scrim.open{display:block}
-.dialog{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(460px,calc(100% - 24px));max-height:calc(100% - 48px);display:none;flex-direction:column;z-index:31;overflow:hidden}
-.dialog.open{display:flex}
-.dialog header,.drawer header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line)}
-.dialog h3,.drawer h3{font-size:20px}
-.dialog .body{padding:18px 20px 20px;overflow-y:auto}
-.dialog label{display:block;font-size:13.5px;color:var(--muted);margin-bottom:6px}
-.field{width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
-.field:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
-.actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
-.divider{border:0;border-top:1px solid var(--line);margin:20px 0 16px}
-.warn{padding:12px 14px;border-radius:10px;background:var(--down-soft);font-size:14px}
-.warn b{color:var(--down)}
-.err{color:var(--down);font-size:13px;min-height:18px;margin-top:6px}
-.drawer{position:fixed;top:0;right:0;bottom:0;width:min(440px,100%);z-index:31;transform:translateX(105%);transition:transform .22s ease;display:flex;flex-direction:column;border-radius:0;border-width:0 0 0 1px;padding-top:env(safe-area-inset-top,0px)}
-.drawer.open{transform:none}
-.drawer .body{padding:20px;overflow-y:auto}
-.kv{display:grid;grid-template-columns:1fr auto;gap:8px 12px;margin:0 0 18px}
-.kv dt{color:var(--muted)} .kv dd{margin:0;text-align:right;font-weight:500}
-.big{display:flex;gap:24px;margin:4px 0 18px;flex-wrap:wrap}
-.big small{display:block;color:var(--muted);font-size:12.5px}
-.big b{font-size:26px;font-weight:600}
-.minititle{font-weight:600;margin:6px 0 8px}
-.emptybox{padding:16px;border:1.5px dashed var(--line);border-radius:10px;color:var(--muted)}
-.note{font-size:12.5px;color:var(--muted);margin-top:12px}
-.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--ink);color:var(--surface);padding:10px 12px 10px 18px;border-radius:999px;display:flex;gap:14px;align-items:center;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:40;font-size:14px}
-.toast.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
-.toast button{border:0;background:none;color:var(--surface);font-weight:600;text-decoration:underline;padding:4px 8px}
-.toast button[hidden]{display:none}
-.vh{position:absolute;left:-9999px}
-@media (max-width:820px){.col-val,.col-model{display:none}}
-@media (max-width:640px){
-  .wrap{padding:16px 14px 60px}
-  .topbar-inner{padding:14px 16px 16px}
-  .brand{font-size:26px}
-  .banner-top,.banner-bar,.tbl-top{padding-left:16px;padding-right:16px}
-  .search{flex-basis:100%;order:5}
-  .banner-bar .spacer{display:none}
-  .col-report,.col-tools{display:none}
-  .tabs{margin-left:-12px;order:0;flex-basis:100%}
-  .tabs button{padding:8px 12px 10px;margin-bottom:-19px}
-  th:first-child,td:first-child{padding-left:16px}
-  .gap-bar{width:60px}
-}
-@media (prefers-reduced-motion:reduce){.drawer,.toast{transition:none}}
-.pill.refresh{padding:7px 14px;font-size:14px;color:var(--blue)}
-.pill.refresh:disabled{opacity:.7;cursor:default}
-.pill.refresh.busy svg{animation:spin 1s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.pill.refresh.busy svg{animation:none}}
+  // axis maximum that is a whole number of nice steps (4 or fewer gridlines)
+  function niceMax(v) { const st = niceStep(v / 4); return Math.max(st, Math.ceil(v / st) * st); }
+  const k = v => Math.abs(v) >= 1000 ? (v / 1000).toFixed(1).replace(/\.0$/, "") + "k" : Math.round(v).toString();
 
-/* ---------- company page ---------- */
-[hidden]{display:none !important}
-.cp{display:flex;flex-direction:column;gap:16px}
-.back{color:var(--blue);text-decoration:none;font-weight:500;align-self:flex-start;padding:4px 0}
-.back:hover{text-decoration:underline}
-.cp-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
-.cp-title{display:flex;align-items:center;gap:14px}
-.cp-title .flag{width:30px;height:30px}
-.cp-title h1{font-size:30px;line-height:1.15}
-.cp-title small{color:var(--muted);font-size:14px}
-.cp-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;display:flex;flex-direction:column;gap:2px}
-.stat small{color:var(--muted);font-size:13px}
-.stat b{font-size:26px;font-weight:600;letter-spacing:-.01em}
-.stat b.stat-text{font-size:18px;padding:6px 0 4px}
-.stat span{font-size:13px}
-.stat-up{border-color:var(--up);background:var(--up-soft)}
-.stat-up b{color:var(--up)}
-.stat-down{border-color:var(--down);background:var(--down-soft)}
-.stat-down b{color:var(--down)}
-.cp-model,.cp-chart{padding:20px 24px}
-.cp-model h2,.cp-chart h2{font-size:20px;margin-bottom:4px}
-.cp-file,.rv-file{display:flex;gap:12px;align-items:center;margin:12px 0 16px}
-.xl{width:30px;height:30px;flex:none}
-.small{font-size:13px}
-.cp-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.steps{margin:12px 0 18px;padding-left:22px;display:flex;flex-direction:column;gap:6px}
-.cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.chart-svg{width:100%;height:auto;display:block;margin-top:8px}
-.cp-chart .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin-top:8px}
-.cp-chart .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
-.cp-chart .legend i.ln{height:3px;width:16px;border-radius:2px;background:var(--ink);vertical-align:3px}
-.tbl-scroll{overflow-x:auto;margin-top:10px}
-table.assump,table.versions{width:100%;border-collapse:collapse;font-size:14px}
-table.assump th,table.assump td,table.versions th,table.versions td{padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-table.assump thead th,table.versions thead th{font-weight:500;color:var(--muted);font-size:13px;text-align:right}
-table.assump thead th:first-child,table.versions thead th{text-align:left}
-table.assump tbody th{text-align:left;font-weight:400}
-table.assump td{text-align:right}
-table.assump tr.strong th,table.assump tr.strong td{font-weight:600}
-table.versions td.file{color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis}
-.link-btn{border:0;background:none;color:var(--blue);font-weight:500;padding:4px 6px}
-.link-btn:hover{text-decoration:underline}
-.pill:disabled{opacity:.5;cursor:default}
+  /* ================= shared chart style ================= */
+  const NAVY = "#13307A", LIGHT = "#8FB6E8", RED = "#D9827C", ACT_BG = "#F3F4F6";
+  const W = 780, H = 340;
+  const label = (x, y, txt, o = {}) =>
+    `<text x="${x}" y="${y}" text-anchor="${o.anchor || "middle"}" font-size="${o.size || 12}" font-weight="${o.weight || 400}" fill="${o.fill || "var(--ink)"}"${o.ls ? ` letter-spacing="${o.ls}"` : ""}>${txt}</text>`;
 
-/* ---------- review dialog ---------- */
-.dialog.wide{width:min(620px,calc(100% - 24px))}
-.rv-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:4px 0 14px}
-.rv-stats div{background:var(--bg);border-radius:10px;padding:10px 12px}
-.rv-stats small{display:block;color:var(--muted);font-size:12.5px}
-.rv-stats b{font-size:19px;font-weight:600}
-.checks{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-direction:column;gap:6px}
-.checks li{padding:8px 12px 8px 34px;border-radius:10px;position:relative;font-size:14px}
-.checks li::before{position:absolute;left:12px;top:8px;font-weight:700}
-.checks li.good{background:var(--up-soft)} .checks li.good::before{content:"✓";color:var(--up)}
-.checks li.warn-i{background:var(--amber-soft)} .checks li.warn-i::before{content:"!";color:var(--amber)}
-.checks li.bad{background:var(--down-soft)} .checks li.bad::before{content:"✕";color:var(--down)}
+  /* waterfall from cash flows to equity value (same look as the key chart) */
+  function waterfall(steps, h, VW = W) {
+    const W = VW, l = 10, r = 10, t = 34, b = 46, cw = W - l - r, ch = H - t - b;
+    let run = 0, hi = 0;
+    const bars = steps.map(s => {
+      if (s.total) { run = s.value; hi = Math.max(hi, run); return { ...s, from: 0, to: s.value }; }
+      const bar = { ...s, from: run, to: run + s.value }; run += s.value; hi = Math.max(hi, bar.from, bar.to); return bar;
+    });
+    const y = v => t + ch - v / (hi * 1.05) * ch, bw = cw / bars.length;
+    let g = `<line x1="${l}" x2="${W - r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>`;
+    bars.forEach((s, i) => {
+      const top = y(Math.max(s.from, s.to)), bot = y(Math.min(s.from, s.to)), xc = l + bw * (i + 0.5), w = bw * 0.56;
+      const color = s.total ? NAVY : s.value >= 0 ? LIGHT : RED;
+      g += `<rect x="${xc - w / 2}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${color}"/>`;
+      g += label(xc, top - 7, h.fmt(s.value, 0));
+      s.label.split("\n").forEach((part, j) => { g += label(xc, H - b + 20 + j * 15, h.esc(part), { fill: "var(--muted)" }); });
+    });
+    return `<div class="kc-scroll"><svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="From cash flows to equity value">${g}</svg></div>`;
+  }
 
-@media (max-width:820px){
-  .cp-stats{grid-template-columns:1fr 1fr}
-  .cp-grid{grid-template-columns:1fr}
-  .rv-stats{grid-template-columns:1fr 1fr}
-}
+  /* ================= key chart: actual history + your forecast ================= */
+  const METRICS = {
+    sales: { name: "Revenue", a: "net sales", q: "net sales", arrows: true },
+    ebitda: { name: "EBITDA", a: "adjusted ebitda", q: "adjusted ebitda", bubble: "margin" },
+    ebit: { name: "EBIT", a: "ebit", q: "ebit", bubble: "margin", oneoff: true },
+    ni: { name: "Net income", a: "net income", q: "net income", bubble: "eps", oneoff: true },
+    fcf: { name: "Free cash flow", a: "free cash flow, mr. market definition", q: "free cash flow, reported", arrows: true },
+    roic: { name: "ROIC", pct: true }
+  };
+  const NOTES = {
+    sales: ["Net sales"],
+    ebitda: ["Actual years: adjusted EBITDA, excluding one-offs", "Forecast: EBITDA from your model", "Pills: EBITDA margin"],
+    ebit: ["Actual years as reported, including one-offs", "Pills: EBIT margin"],
+    ni: ["Forecast: EBIT minus financial costs and tax from your model", "Pills: earnings per share in SEK, forecast on today's share count"],
+    fcf: ["Actual years on the same definition as your forecast", "Reported quarters: operating cash flow minus capex"],
+    roic: ["ROIC = EBITA after tax / operating capital, including goodwill",
+           "Operating capital = working capital + tangible assets incl. right-of-use + intangible assets, at year end",
+           "Forecast capital rolled forward with capex, depreciation, amortisation and working capital",
+           "New leases assumed equal to lease depreciation; acquisitions after the last report not included"]
+  };
+  const v0 = (arr, i) => (arr && arr[i] != null ? arr[i] : 0);
+  const taxRate = (tax, pbt) => (pbt > 0 ? Math.min(0.4, Math.max(0, tax / pbt)) : 0);
 
-.cp table th,.cp table td{padding:9px 10px}
-.cp table.versions th,.cp table.versions td{text-align:left}
-.cp table.versions td:nth-child(3),.cp table.versions th:nth-child(3){text-align:right}
-.cp tbody tr{cursor:default}
-.cp tbody tr:hover{background:transparent}
+  function seriesFor(key, ctx) {
+    const { data, result, actuals } = ctx;
+    if (key === "roic") return roicSeries(ctx);
+    const M = METRICS[key], A = actuals && actuals.annual, Q = actuals && actuals.quarterly;
+    const P = data ? data.periods : [], L = data ? data.lines : {};
+    const qIdx = P.map((p, i) => i).filter(i => P[i].kind === "Q");
+    const curYear = qIdx.length ? P[qIdx[0]].label.slice(3) : null;
+    const fcVal = (k, i) => k === "ni" ? (result.ebit[i] == null ? null : result.ebit[i] - v0(L.fin, i) - v0(L.tax, i)) : result[k][i];
+    const bars = [];
+    if (A) {
+      const vals = A.get(M.a), sales = A.get("net sales"), eps = A.get("eps, diluted"), iac = A.get("items affecting comparability");
+      A.periods.forEach((y, i) => {
+        if (+y < 2021 || (curYear && +y >= +curYear) || vals[i] == null) return;
+        bars.push({ label: y, actual: vals[i], forecast: null, sales: sales[i], eps: eps[i], oneoff: (iac[i] || 0) > 0 });
+      });
+    }
+    if (data && result) {
+      if (qIdx.length) {
+        let act = 0, actSales = 0, actEps = 0, haveAct = true, fc = 0, fcSales = 0, fcNi = 0, anyFc = false, oneoff = false;
+        const hasRep = qIdx.some(i => P[i].status.toLowerCase() === "reported");
+        qIdx.forEach(i => {
+          if (P[i].status.toLowerCase() === "reported") {
+            const lab = P[i].label, x = Q ? Q.value(M.q, lab) : null;
+            if (x == null) haveAct = false;
+            else { act += x; actSales += Q.value("net sales", lab) || 0; actEps += Q.value("eps, diluted", lab) || 0; }
+            if ((Q && Q.value("items affecting comparability", lab) || 0) > 0) oneoff = true;
+          } else { anyFc = true; fc += fcVal(key, i) || 0; fcSales += result.sales[i] || 0; fcNi += fcVal("ni", i) || 0; }
+        });
+        const okA = hasRep && haveAct;
+        bars.push({ label: curYear, actual: okA ? act : null, forecast: anyFc ? fc : null, split: okA && anyFc,
+                    sales: (okA ? actSales : 0) + fcSales, eps: (okA ? actEps : 0) + fcNi / data.inputs.shares, oneoff });
+      }
+      P.forEach((p, i) => {
+        if (p.kind !== "FY" || p.status.toLowerCase() !== "forecast") return;
+        bars.push({ label: p.label.replace(/^FY /, ""), actual: null, forecast: fcVal(key, i), sales: result.sales[i], eps: fcVal("ni", i) / data.inputs.shares });
+      });
+    }
+    return bars;
+  }
 
-/* ---------- key chart ---------- */
-.kc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
-.kc-head h2{font-size:20px;max-width:640px;line-height:1.3}
-.kc-tabs{flex-wrap:wrap}
-.kc-tabs button{padding:7px 14px;font-size:13.5px}
-.kc .legend i.split{background:linear-gradient(to top,#13307A 50%,#8FB6E8 50%)}
-.kc .legend i.pill{width:18px;border-radius:7px;background:#E6EAF2}
-.kc-foot{display:flex;justify-content:flex-end;margin-top:6px}
-.kc-foot .ic{width:15px;height:15px;vertical-align:-3px;margin-right:6px}
-.kc-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
-@media (max-width:820px){.kc-scroll svg{min-width:680px}}
-/* key chart v2: fixed selector top-left, legend top-right, notes bottom-left */
-.kc-title{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
-.kc-title h2{font-size:20px;margin:0}
-.kc-title .unit{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
-.kc-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
-.kc-legend{margin:0 !important;display:flex;gap:18px;align-items:center;justify-content:flex-end;font-size:12.5px;color:var(--muted)}
-.kc-legend span{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
-.kc-legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin:0 !important}
-.kc-legend i.split{background:linear-gradient(to top,#13307A 50%,#8FB6E8 50%)}
-.kc-notes{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:12.5px;color:var(--muted)}
-.kc-empty{padding:40px 0;text-align:center}
-.kc .chart-svg text{font-family:inherit}
+  /* ROIC, operating definition: EBITA after tax / operating capital (working capital + tangible + intangible assets).
+     History from the actuals file; forecast capital rolled forward from the last year-end. */
+  function roicSeries(ctx) {
+    const { data, result, actuals } = ctx, A = actuals && actuals.annual, Q = actuals && actuals.quarterly;
+    const bars = [];
+    if (!A) return bars;
+    const roic = A.get("roic"), cap = A.get("operating capital"), lp = A.get("lease payments");
+    const P = data ? data.periods : [], L = data ? data.lines : {};
+    const qIdx = P.map((p, i) => i).filter(i => P[i].kind === "Q");
+    const curYear = qIdx.length ? P[qIdx[0]].label.slice(3) : null;
+    let base = null, baseYear = null, leaseDep = 0;
+    A.periods.forEach((y, i) => {
+      if (+y < 2021 || (curYear && +y >= +curYear)) return;
+      if (roic[i] != null) bars.push({ label: y, actual: roic[i], forecast: null });
+      if (cap[i] != null) { base = cap[i]; baseYear = y; }
+      if (lp[i] != null) leaseDep = lp[i];
+    });
+    if (!(data && result) || base == null) return bars;
+    const nopatFc = i => (result.ebit[i] + v0(L.amort, i)) * (1 - Math.min(0.4, Math.max(0, result.taxRate[i] || 0)));
+    let ic = base, nopat = 0, hasAct = false, anyFc = false, nwcPrev = A.value("working capital", baseYear);
+    qIdx.forEach(i => {
+      const lab = P[i].label;
+      if (P[i].status.toLowerCase() === "reported" && Q) {
+        const ebita = Q.value("ebita (reported)", lab), tax = Q.value("income tax", lab), pbt = Q.value("profit before tax", lab);
+        const capex = Q.value("capex", lab), dep = Q.value("depreciation", lab), am = Q.value("amortisation", lab), nwc = Q.value("working capital", lab);
+        if (ebita != null) { nopat += ebita * (1 - taxRate(tax || 0, pbt || 0)); hasAct = true; }
+        ic += (capex || 0) - (dep || 0) + leaseDep / 4 - (am || 0) + (nwc != null && nwcPrev != null ? nwc - nwcPrev : 0);
+        if (nwc != null) nwcPrev = nwc;
+      } else {
+        anyFc = true; nopat += nopatFc(i);
+        ic += v0(L.capex, i) - v0(L.dep, i) + leaseDep / 4 - v0(L.amort, i) + v0(L.nwc, i);
+      }
+    });
+    if (qIdx.length) bars.push({ label: curYear, actual: null, forecast: nopat / ic, split: false, mixed: hasAct && anyFc });
+    P.forEach((p, i) => {
+      if (p.kind !== "FY" || p.status.toLowerCase() !== "forecast") return;
+      ic += v0(L.capex, i) - v0(L.dep, i) + leaseDep - v0(L.amort, i) + v0(L.nwc, i);
+      bars.push({ label: p.label.replace(/^FY /, ""), actual: null, forecast: nopatFc(i) / ic });
+    });
+    return bars;
+  }
 
-/* valuation card: waterfall + value per share panel */
-.vc-grid{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:20px;align-items:start}
-.vc-panel{background:#F3F4F6;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:14px;font-size:14px}
-.vp-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0}
-.vp-row span{color:var(--muted)}
-.vp-row b{font-weight:500;font-variant-numeric:tabular-nums}
-.vp-total{border-top:1px solid #D5D9E0;margin-top:4px;padding-top:9px}
-.vp-total span{color:var(--ink);font-weight:500}
-.vp-total b{font-size:20px;font-weight:600;color:#13307A}
-.vp-up b{font-weight:600}
-.vp-wacc{border-top:1px solid #D5D9E0;padding-top:10px}
-.vp-wacc .vp-row b{font-size:18px;font-weight:600;color:#13307A}
-#wacc-slider{width:100%;accent-color:#13307A;margin:6px 0 0;cursor:pointer;height:24px}
-.vp-scale{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
-.vp-reset{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
-.vp-reset .link-btn:disabled{color:var(--muted);opacity:.5;cursor:default;text-decoration:none}
-.vp-hint{margin:6px 0 0}
-@media (max-width:820px){.vc-grid{grid-template-columns:minmax(0,1fr)}}
-.vp-row b{white-space:nowrap}
-.vp-row span small{display:block;font-size:11.5px;color:var(--muted);margin-top:1px}
-.vp-reset .link-btn{padding:4px 0 4px 12px}
-.vp-reset{flex-direction:column;align-items:flex-start;gap:4px}
-.vp-reset > span:last-child{display:flex;gap:18px}
-.vp-reset .link-btn{padding:4px 0}
+  function cagr(a, b, n) { return a > 0 && b > 0 && n > 0 ? Math.pow(b / a, 1 / n) - 1 : null; }
 
-.updating{position:fixed;top:0;left:0;right:0;z-index:100;background:#13307A;color:#fff;text-align:center;padding:12px 16px;font-size:15px}
+  function keyChart(bars, key, h) {
+    const M = METRICS[key], pctMode = !!M.pct;
+    const l = 14, r = 14, t = M.arrows ? 92 : M.bubble ? 74 : 50, b = 34, cw = W - l - r, ch = H - t - b;
+    const tot = bars.map(x => (x.actual || 0) + (x.forecast || 0));
+    const hi = Math.max(0, ...tot) * 1.08 || 1, lo = Math.min(0, ...tot) * 1.05;
+    const negRoom = lo < 0 ? 24 : 0, bottom = H - b - 6 - negRoom;
+    const y = v => t + (hi - v) / (hi - lo) * (bottom - t), bw = cw / bars.length, xc = i => l + bw * (i + 0.5);
+    const fmtV = v => pctMode ? (v * 100).toFixed(1) + "%" : h.fmt(v, 0);
+    const firstFc = bars.findIndex(x => x.forecast != null);
+    let g = "";
+    // light grey background behind the actual years
+    if (firstFc > 0) {
+      g += `<rect x="${l}" y="0" width="${bw * firstFc}" height="${H - b + 4}" fill="${ACT_BG}" rx="6"/>`;
+      g += label(l + 12, 18, "ACTUAL", { anchor: "start", size: 11, weight: 600, fill: "var(--muted)", ls: ".06em" });
+      g += label(l + bw * firstFc + 12, 18, "YOUR FORECAST", { anchor: "start", size: 11, weight: 600, fill: NAVY, ls: ".06em" });
+    } else if (firstFc === 0) {
+      g += label(l + 12, 18, "YOUR FORECAST", { anchor: "start", size: 11, weight: 600, fill: NAVY, ls: ".06em" });
+    }
+    g += `<line x1="${l}" x2="${W - r}" y1="${y(0)}" y2="${y(0)}" stroke="#C9CED6"/>`;
+    bars.forEach((x, i) => {
+      const a = x.actual || 0, f = x.forecast || 0, total = a + f, w = bw * 0.58, x0 = xc(i) - w / 2;
+      if (x.split && a >= 0 && f >= 0) {
+        g += `<rect x="${x0}" y="${y(a)}" width="${w}" height="${Math.max(0, y(0) - y(a))}" fill="${NAVY}"><title>${x.label} reported: ${fmtV(a)}</title></rect>`;
+        g += `<rect x="${x0}" y="${y(total)}" width="${w}" height="${Math.max(0, y(a) - y(total))}" fill="${LIGHT}"><title>${x.label} your forecast: ${fmtV(f)}</title></rect>`;
+      } else {
+        const top = y(Math.max(0, total)), bot = y(Math.min(0, total));
+        g += `<rect x="${x0}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${x.actual != null && x.forecast == null ? NAVY : LIGHT}"><title>${x.label}: ${fmtV(total)}</title></rect>`;
+      }
+      g += label(xc(i), total >= 0 ? y(total) - 7 : y(total) + 16, fmtV(total) + (M.oneoff && x.oneoff ? "*" : ""));
+      if (M.bubble) {
+        const val = M.bubble === "margin" ? (x.sales ? total / x.sales : null) : x.eps;
+        if (val != null && isFinite(val)) {
+          const txt = M.bubble === "margin" ? (val * 100).toFixed(1) + "%" : val.toFixed(2), bwid = txt.length * 7 + 16, by = t - 30;
+          const isAct = x.actual != null && x.forecast == null;
+          g += `<rect x="${xc(i) - bwid / 2}" y="${by - 13}" width="${bwid}" height="20" rx="10" fill="${isAct ? NAVY : LIGHT}"/>` +
+               label(xc(i), by + 2, txt, { size: 11, weight: 500, fill: isAct ? "#fff" : NAVY });
+        }
+      }
+      g += label(xc(i), H - b + 20, x.label, { fill: "var(--muted)" });
+    });
+    // CAGR arrows: thin, separated, line broken around the label
+    const notes = [];
+    if (M.arrows) {
+      const lastA = firstFc > 0 ? firstFc - 1 : bars.length - 1, lastF = bars.length - 1;
+      const seg = (i0, i1, color, gapStart, gapEnd) => {
+        if (i1 <= i0) return;
+        const n = +bars[i1].label - +bars[i0].label, c = cagr(tot[i0], tot[i1], n);
+        const txt = c != null ? `CAGR ${c >= 0 ? "+" : ""}${(c * 100).toFixed(1)}%` : "CAGR n/a";
+        if (c == null) notes.push(`CAGR n/a ${bars[i0].label}–${bars[i1].label}: a growth rate cannot be calculated from a negative or zero value`);
+        const ay = t - 46, x1 = xc(i0) + gapStart, x2 = xc(i1) - gapEnd, xm = (x1 + x2) / 2, tw = txt.length * 7 + 20;
+        g += `<line x1="${x1}" x2="${xm - tw / 2 - 6}" y1="${ay}" y2="${ay}" stroke="${color}" stroke-width="1"/>` +
+             `<line x1="${xm + tw / 2 + 6}" x2="${x2}" y1="${ay}" y2="${ay}" stroke="${color}" stroke-width="1"/>` +
+             `<path d="M${x2 - 6},${ay - 3.5} L${x2},${ay} L${x2 - 6},${ay + 3.5}" fill="none" stroke="${color}" stroke-width="1"/>` +
+             `<rect x="${xm - tw / 2}" y="${ay - 11}" width="${tw}" height="22" rx="11" fill="var(--surface)" stroke="${color}" stroke-width="1"/>` +
+             label(xm, ay + 4, txt, { size: 11.5, weight: 500, fill: color });
+      };
+      seg(0, lastA, "var(--ink)", 0, 10);
+      if (firstFc > 0) seg(lastA, lastF, NAVY, 10, 0);
+    }
+    return { svg: `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="${h.esc(M.name)}, actual and forecast">${g}</svg>`, notes };
+  }
 
-/* brand: larger, vertically centred, links to the start page */
-.topbar-inner{min-height:76px;padding:12px 22px;align-items:center}
-.brand{font-size:36px;line-height:1;margin:0;display:flex;align-items:center}
-.brand-link{color:#fff;text-decoration:none;display:inline-block;padding:4px 0}
-.brand-link:hover{opacity:.9}
-.brand-link:focus-visible{outline:2px solid #fff;outline-offset:4px;border-radius:4px}
-@media (max-width:820px){.topbar-inner{min-height:64px;padding:10px 16px}.brand{font-size:30px}}
-.updating b{font-weight:600}
-.updating button{margin-left:10px;border:1px solid #fff;background:transparent;color:#fff;border-radius:999px;padding:4px 12px;cursor:pointer}
+  function buildKeyChart(ctx) {
+    const { data, result, actuals, h } = ctx, key = ctx.metric || "sales", M = METRICS[key];
+    if (!actuals && !(data && result)) return "";
+    const bars = seriesFor(key, ctx).filter(x => x.actual != null || x.forecast != null);
+    const tabs = Object.entries(METRICS).map(([k2, m]) => `<button data-action="metric" data-metric="${k2}" aria-pressed="${k2 === key}">${m.name}</button>`).join("");
+    const split = bars.find(x => x.split);
+    const legend = `<span><i style="background:${NAVY}"></i>Actual</span><span><i style="background:${LIGHT}"></i>Your forecast</span>` +
+      (split ? `<span><i class="split"></i>${split.label}: reported + your forecast</span>` : "");
+    let body, notes = [];
+    if (bars.length) { const kc = keyChart(bars, key, h); body = `<div class="kc-scroll">${kc.svg}</div>`; notes = kc.notes; }
+    else body = `<p class="dim kc-empty">${key === "roic" ? "ROIC needs historical balance sheet data for this company" : "No data to show yet"}</p>`;
+    const foot = [...NOTES[key], ...(M.oneoff && bars.some(x => x.oneoff) ? ["* Includes one-offs (restructuring)"] : []), ...notes,
+                  ...(actuals ? [] : ["No historical data yet for this company"])];
+    return `<section class="card cp-chart kc">
+      <div class="kc-title"><h2>Actual vs forecast</h2><span class="unit">${M.pct ? "%" : "SEK m"}</span></div>
+      <div class="kc-bar"><div class="seg kc-tabs" role="group" aria-label="Choose metric">${tabs}</div><div class="legend kc-legend">${legend}</div></div>
+      ${body}
+      <ul class="kc-notes">${foot.map(n => `<li>${h.esc(n)}</li>`).join("")}</ul>
+    </section>`;
+  }
 
-/* ---------- upload dialog ---------- */
-.dropzone{display:flex;flex-direction:column;align-items:center;gap:8px;padding:34px 20px;border:2px dashed #C9CED6;border-radius:14px;background:#F7F8FA;text-align:center;cursor:pointer;transition:background .15s,border-color .15s}
-.dropzone:hover,.dropzone.over{background:#EEF3FA;border-color:#13307A}
-.dropzone .xl{width:36px;height:36px}
-.dropzone b{font-size:16px}
-.rv-company{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#F3F4F6;border-radius:12px;padding:12px 14px;margin:0 0 14px}
-.rv-company .link-btn{margin-left:auto;font-size:13.5px}
-.rv-choose{background:#F3F4F6;border-radius:12px;padding:12px 14px;margin:0 0 14px;display:flex;flex-direction:column;gap:8px}
-.rv-results{display:flex;flex-direction:column;gap:2px;max-height:240px;overflow:auto}
-.rv-hit{display:flex;align-items:center;gap:10px;border:0;background:var(--surface);border-radius:8px;padding:8px 10px;text-align:left;cursor:pointer}
-.rv-hit:hover{background:#EEF3FA}
-.rv-note-label{display:block;font-size:14px;margin:12px 0 6px}
-/* ---------- My models page ---------- */
-.mm{display:flex;flex-direction:column;gap:14px}
-.mm-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.mm-head h1{font-size:28px}
-.mm-filter{align-self:flex-start}
-.mm-empty{padding:22px 24px}
-.mm-empty h2{font-size:20px;margin-bottom:6px}
-.mm-list{padding:6px 0}
-.mm-row{display:grid;grid-template-columns:36px minmax(170px,1.3fr) minmax(190px,1.6fr) 90px 90px minmax(220px,1.6fr);gap:12px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line)}
-.mm-row:last-child{border-bottom:0}
-.mm-row .r{text-align:right;font-variant-numeric:tabular-nums}
-.mm-hdr{font-size:12.5px;color:var(--muted);padding-top:8px;padding-bottom:8px}
-.mm-tog{border:0;background:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--muted);cursor:pointer}
-.mm-tog:hover{background:var(--hover)}
-.mm-tog svg{width:18px;height:18px;transition:transform .15s}
-.mm-row.open .mm-tog svg{transform:rotate(90deg)}
-.mm-co{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none}
-.mm-co b{display:block;font-weight:500}
-.mm-co small,.mm-file small{display:block;color:var(--muted);font-size:12.5px}
-.mm-co:hover b{color:var(--blue)}
-.mm-file .fn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mm-status{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
-.mm-status small{font-size:12px}
-.chip{display:inline-block;border-radius:999px;padding:4px 10px;font-size:12.5px;font-weight:500;line-height:1.3}
-.chip.ok{background:var(--up-soft);color:var(--up)}
-.chip.update{background:var(--amber-soft);color:var(--amber)}
-.chip.unknown,.chip.hidden{background:#F3F4F6;color:var(--muted)}
-.mm-none{padding:16px 22px}
-.mm-versions{background:#F7F8FA;border-bottom:1px solid var(--line);padding:6px 18px 16px 66px}
-.mm-versions table{width:100%;border-collapse:collapse;font-size:13.5px}
-.mm-versions th{font-weight:500;color:var(--muted);font-size:12.5px;text-align:left;padding:8px 8px;border-bottom:1px solid var(--line)}
-.mm-versions td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-.mm-versions .r{text-align:right}
-.mm-versions td small{display:block;color:var(--muted);font-size:12px}
-.mm-versions td.fn{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mm-versions tr.is-hidden td{opacity:.55}
-.mm-versions .note-cell{max-width:280px}
-.mm-versions .note-cell .field{padding:6px 10px;font-size:13.5px}
-.mm-versions .note-act{display:flex;gap:12px;margin-top:4px}
-.mm-versions .acts{white-space:nowrap;text-align:right}
-.link-btn.sm{font-size:13px;padding:2px 6px}
-.mm-hidtog{margin-top:8px}
-.mm-vacts{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
-.mm-vacts a.pill{text-decoration:none;color:inherit}
-.vnote{display:block;color:var(--muted);font-size:12px;white-space:normal}
-@media (max-width:820px){
-  .mm-hdr{display:none}
-  .mm-row{grid-template-columns:32px 1fr auto;grid-template-areas:"tog co val" "tog file file" "tog basis basis" "tog st st";gap:4px 10px;padding:12px 14px}
-  .mm-row>.mm-tog{grid-area:tog;align-self:start}
-  .mm-row>.mm-co{grid-area:co}
-  .mm-row>.mm-file{grid-area:file}
-  .mm-row>span:nth-child(4){grid-area:basis;color:var(--muted);font-size:13px}
-  .mm-row>span:nth-child(5){grid-area:val;font-weight:600}
-  .mm-row>.mm-status{grid-area:st;margin-top:4px}
-  .mm-versions{padding:6px 12px 14px;overflow-x:auto}
-  .mm-versions table{min-width:640px}
-}
-.mm-versions th,.mm-versions td{text-align:left}
-.mm-versions th.r,.mm-versions td.r{text-align:right}
-.mm-versions td.acts{text-align:right}
-.mm-versions tbody tr{cursor:default}
-.mm-versions tbody tr:hover{background:transparent}
-.mm-versions th:first-child,.mm-versions td:first-child{padding-left:8px}
+  /* ================= valuation: waterfall + value per share panel with a WACC slider ================= */
+  const withWacc = (data, wacc) => Object.assign({}, data, { inputs: Object.assign({}, data.inputs, { wacc }) });
+  function waccRange(data) {
+    const g = String(data.inputs.method || "").toLowerCase() === "terminal growth" ? (data.inputs.growth || 0) : -1;
+    return { min: Math.max(4, Math.ceil((g + 0.005) * 1000) / 10), max: 16 };
+  }
+  function valuationParts(ctx, wacc) {
+    const { data, h, s } = ctx;
+    const res = MMModels.computeValuation(withWacc(data, wacc));
+    const fy = data.periods.filter(p => p.kind === "FY"), lastY = fy.length ? fy[fy.length - 1].label.slice(-2) : "";
+    const firstY = data.periods.length ? data.periods[0].label.slice(-4) : "";
+    const steps = [
+      { label: `Cash flows\n${firstY}–${lastY}`, value: res.sumPv },
+      { label: "Terminal\nvalue", value: res.pvTv },
+      { label: "Enterprise\nvalue", value: res.ev, total: true },
+      { label: "Net\ndebt", value: -res.netDebt },
+      { label: "Lease\nliabilities", value: -res.leases },
+      { label: "Earn-outs\n& options", value: -res.other },
+      { label: "Equity\nvalue", value: res.equity, total: true }
+    ];
+    const price = s.price, up0 = price ? res.vps / price - 1 : null, up = up0 != null && Math.abs(up0) < 0.0005 ? 0 : up0;
+    const calc = `
+      <div class="vp-row"><span>Equity value</span><b>${h.fmt(res.equity, 0)}</b></div>
+      <div class="vp-row"><span>÷ Shares outstanding, m</span><b>${h.fmt(data.inputs.shares)}</b></div>
+      <div class="vp-row vp-total"><span>Value per share</span><b>SEK ${h.fmt(res.vps)}</b></div>
+      <div class="vp-row"><span>Share price${s.priceDate ? `<small>as of ${h.fmtDate(s.priceDate)}</small>` : ""}</span><b>${price != null ? "SEK " + h.fmt(price) : "–"}</b></div>
+      <div class="vp-row vp-up"><span>${up == null || up >= 0 ? "Upside" : "Downside"}</span><b class="${up == null || up === 0 ? "" : up > 0 ? "pos" : "neg"}">${up == null ? "–" : h.pct(up)}</b></div>`;
+    return { chart: waterfall(steps, h, 560), calc, note: `Present values at a WACC of ${(wacc * 100).toFixed(1)}%`, res };
+  }
+  function valuationCard(ctx) {
+    const { data } = ctx, base = data.inputs.wacc, wacc = ctx.wacc != null ? ctx.wacc : base, rg = waccRange(data);
+    const parts = valuationParts(ctx, wacc);
+    return `<section class="card cp-chart kc" id="valuation-card"><div class="kc-title"><h2>From cash flows to value</h2><span class="unit">SEK m</span></div>
+      <div class="vc-grid">
+        <div class="vc-chart"><div id="wf-chart">${parts.chart}</div><ul class="kc-notes"><li id="wf-note">${parts.note}</li></ul></div>
+        <aside class="vc-panel">
+          <div id="wf-calc">${parts.calc}</div>
+          <div class="vp-wacc">
+            <div class="vp-row"><span>WACC</span><b id="wacc-val">${(wacc * 100).toFixed(1)}%</b></div>
+            <input type="range" id="wacc-slider" min="${rg.min}" max="${rg.max}" step="0.1" value="${(wacc * 100).toFixed(1)}" aria-label="WACC">
+            <div class="vp-scale"><span>${rg.min}%</span><span>${rg.max}%</span></div>
+            <div class="vp-reset"><span class="dim small">Your model: ${(base * 100).toFixed(1)}%</span>
+              <span><button class="link-btn" data-action="wacc-implied" ${ctx.s.price ? "" : "disabled"}>Implied return</button><button class="link-btn" data-action="wacc-reset" ${Math.abs(wacc - base) < 1e-9 ? "disabled" : ""}>Reset</button></span></div>
+            <p class="dim small vp-hint" id="wacc-hint">${(() => { const imp = ctx.wacc != null && ctx.s.price ? impliedWacc(ctx) : null;
+              return imp && imp.wacc && Math.abs(imp.wacc - wacc) < 1e-6 ? `Implied return at today's price: ${(wacc * 100).toFixed(1)}% a year` : "What-if only. Your model is not changed"; })()}</p>
+          </div>
+        </aside>
+      </div></section>`;
+  }
+  // market-implied WACC: the WACC at which your value per share equals today's share price (bisection)
+  function impliedWacc(ctx) {
+    const { data, s } = ctx, price = s.price, rg = waccRange(data);
+    if (!price) return { error: "No share price available" };
+    const vps = w => MMModels.computeValuation(withWacc(data, w)).vps;
+    let lo = rg.min / 100, hi = rg.max / 100;
+    if (vps(lo) < price) return { error: `Your forecast cannot reach today's price even at a WACC of ${rg.min}%` };
+    if (vps(hi) > price) return { error: `Today's price implies a WACC above ${rg.max}%` };
+    for (let k = 0; k < 60; k++) { const mid = (lo + hi) / 2; if (vps(mid) > price) lo = mid; else hi = mid; }
+    return { wacc: (lo + hi) / 2 };
+  }
 
-/* ---------- new report status ---------- */
-.status.upd{background:var(--amber-soft);color:var(--amber);border:1px solid transparent}
-.reported{color:var(--amber);font-weight:500}
-.stat-warn{border-color:var(--amber)}
-.upd-text{color:var(--amber);font-weight:500;font-size:13px}
-.cp-banner{display:flex;align-items:center;gap:12px;background:var(--amber-soft);border-radius:12px;padding:12px 16px;font-size:14.5px}
-.cp-banner b{font-weight:600}
-.cp-banner .link-btn{margin-left:auto;white-space:nowrap}
-.cp-banner-dot{width:9px;height:9px;border-radius:50%;background:var(--amber);flex:none}
+  // fast update while dragging the slider: only the chart and the numbers are redrawn
+  function updateValuation(root, ctx, wacc) {
+    const card = root.querySelector("#valuation-card");
+    if (!card || !ctx.data) return;
+    const parts = valuationParts(ctx, wacc), base = ctx.data.inputs.wacc;
+    card.querySelector("#wf-chart").innerHTML = parts.chart;
+    card.querySelector("#wf-calc").innerHTML = parts.calc;
+    card.querySelector("#wf-note").textContent = parts.note;
+    card.querySelector("#wacc-val").textContent = (wacc * 100).toFixed(1) + "%";
+    const sl = card.querySelector("#wacc-slider"); if (Math.abs(+sl.value / 100 - wacc) > 1e-9) sl.value = (wacc * 100).toFixed(1);
+    card.querySelector('[data-action="wacc-reset"]').disabled = Math.abs(wacc - base) < 1e-9;
+    const imp = ctx.s.price ? impliedWacc(ctx) : null;
+    card.querySelector("#wacc-hint").textContent = imp && imp.wacc && Math.abs(imp.wacc - wacc) < 1e-6
+      ? `Implied return at today's price: ${(wacc * 100).toFixed(1)}% a year` : "What-if only. Your model is not changed";
+  }
 
-/* ---------- forecast vs actual ---------- */
-.fva-head{font-size:15px;font-weight:500;margin:6px 0 10px}
-.fva-cols,.fva-row{display:grid;grid-template-columns:minmax(120px,1.1fr) minmax(200px,3fr) 80px minmax(110px,1fr);gap:12px;align-items:center}
-.fva-cols{font-size:11.5px;color:var(--muted);margin-bottom:2px}
-.fva-axis{display:flex;justify-content:space-between}
-.fva-num-h{text-align:right}
-.fva-block{padding:8px 0 10px;border-top:1px solid var(--line)}
-.fva-title{font-size:12.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 6px}
-.fva-row{padding:5px 0;font-size:14px}
-.fva-row.total .fva-lab{font-weight:600}
-.fva-track{position:relative;height:18px}
-.fva-band{position:absolute;top:0;bottom:0;background:#EEF0F3;border-radius:3px}
-.fva-zero{position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:#AEB4BD}
-.fva-bar{position:absolute;top:3px;height:12px;border-radius:2px}
-.fva-val{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
-.fva-num{text-align:right;color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.kc-legend i.band{background:#EEF0F3;border:1px solid #D5D9E0}
-@media (max-width:820px){
-  .fva-cols,.fva-row{grid-template-columns:96px 1fr 64px;gap:8px}
-  .fva-num,.fva-num-h{display:none}
-}
+  // every section is rendered on its own: if one fails, it shows an error instead of hiding the whole page
+  function safe(title, h, fn) {
+    try { return fn() || ""; }
+    catch (e) {
+      console.error(title, e);
+      return `<section class="card cp-chart"><div class="warn"><b>${h.esc(title)} could not be shown.</b> ${h.esc(e && e.message || String(e))}</div>
+        <div class="actions" style="justify-content:flex-start"><button class="pill" data-action="retry-load">Try again</button></div></section>`;
+    }
+  }
+  const errorBox = (h, title, msg) => `<div class="warn"><b>${h.esc(title)}</b> ${h.esc(msg)}</div>
+    <div class="cp-actions" style="margin-top:10px"><button class="pill" data-action="retry-load">Try again</button></div>`;
 
-/* forecast vs actual v2: category square + thin line with a marker */
-.fva-cols{display:grid;grid-template-columns:120px minmax(120px,1fr) minmax(200px,3fr) 80px minmax(110px,1fr);gap:12px;margin:4px 0 4px}
-.fva-group{display:grid;grid-template-columns:120px 1fr;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
-.fva-cat{background:#F3F4F6;border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;padding:8px;font-size:13px;font-weight:600;color:var(--ink)}
-.fva-rows{display:flex;flex-direction:column}
-.fva-group .fva-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(200px,3fr) 80px minmax(110px,1fr);gap:12px;align-items:center;padding:6px 0}
-.fva-track{position:relative;height:22px}
-.fva-line{position:absolute;left:0;right:0;top:50%;height:1px;background:#C9CED6}
-.fva-band{position:absolute;top:5px;bottom:5px;background:#EEF0F3;border-radius:3px}
-.fva-zero{position:absolute;left:50%;top:2px;bottom:2px;width:1px;background:#8A929E}
-.fva-mark{position:absolute;top:2px;bottom:2px;width:4px;margin-left:-2px;border-radius:2px}
-.fva-block,.fva-title,.fva-head{display:none}
-@media (max-width:820px){
-  .fva-cols{grid-template-columns:72px 80px 1fr 64px;gap:8px}
-  .fva-cols>span:last-child{display:none}
-  .fva-group{grid-template-columns:72px 1fr;gap:8px}
-  .fva-cat{font-size:11.5px;padding:6px}
-  .fva-group .fva-row{grid-template-columns:80px 1fr 64px;gap:8px}
-}
-@media (max-width:820px){.fva-cols{display:none}}
 
-/* ---------- forecast vs actual pop-ups ---------- */
-button.fva-cat{border:0;font-family:inherit;cursor:pointer;flex-direction:column;gap:2px;transition:background .15s}
-button.fva-cat:hover{background:#E6EAF2}
-.fva-more{font-size:18px;line-height:1;color:var(--blue)}
-.dialog.pop{width:min(760px,calc(100% - 24px));max-height:calc(100vh - 40px);overflow:auto}
-.pop-h{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:14px 0 4px}
-.pop-h:first-child{margin-top:0}
-.pop-legend{justify-content:flex-start;margin:4px 0 8px !important}
-.gr,.pp,.dv{display:flex;flex-direction:column;gap:8px}
-.gr-row,.pp-row,.dv-row{display:grid;grid-template-columns:140px 1fr 170px;gap:12px;align-items:center;font-size:14px}
-.gr-track{position:relative;height:16px;background:#F3F4F6;border-radius:3px}
-.gr-bar{position:absolute;top:0;bottom:0}
-.gr-bar.org{left:0;background:#13307A;border-radius:3px 0 0 3px}
-.gr-bar.acq{background:#5B8FD1}
-.gr-tick{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--ink)}
-.gr-val{display:flex;gap:10px;justify-content:flex-end;font-variant-numeric:tabular-nums;white-space:nowrap}
-.gr-val .dim{font-size:12.5px}
-.pp-bars{display:flex;flex-direction:column;gap:3px}
-.pp-bar{height:9px;border-radius:2px}
-.pp-bar.f{background:#8FB6E8}
-.pp-bar.a{background:#13307A}
-.pp-val{display:flex;gap:12px;justify-content:flex-end;font-variant-numeric:tabular-nums}
-.dv-row{grid-template-columns:140px 1fr}
-.dv-cells{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.dv-cell{display:grid;grid-template-columns:1fr 46px;gap:6px;align-items:center}
-.dv-track{position:relative;height:14px}
-.dv-zero{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#8A929E}
-.dv-bar{position:absolute;top:0;bottom:0;border-radius:2px}
-.dv-v{text-align:right;font-size:13px;font-variant-numeric:tabular-nums}
-@media (max-width:820px){
-  .dialog.pop{position:fixed;top:auto;bottom:0;left:0;right:0;transform:none;width:100%;max-height:88vh;border-radius:16px 16px 0 0}
-  .gr-row,.pp-row{grid-template-columns:96px 1fr 110px;gap:8px}
-  .gr-val{flex-direction:column;gap:0;align-items:flex-end}
-  .dv-row{grid-template-columns:96px 1fr}
-  .dv-cells{gap:8px}
-}
-.gr-row{grid-template-columns:140px 1fr 200px}
-.gr-val{flex-direction:column;align-items:flex-end;gap:0}
-@media (max-width:820px){.gr-row{grid-template-columns:96px 1fr 120px}}
+  /* ================= forecast vs actual ================= */
+  const GREEN = "#2E8B57", REDB = "#C8504A", GREYB = "#C9CED6";
+  function compareRows(data, A, Q) {
+    const i = data.periods.findIndex(p => p.label === Q && String(p.status).toLowerCase() === "forecast");
+    if (i < 0 || !A || !A.quarterly) return null;
+    const S = A.segments, v = (arr) => (arr && arr[i] != null ? arr[i] : 0);
+    const segAct = (sec, name) => (S ? S.seg(sec, name, Q) : null);
+    const sales = [], ebitda = [], margin = [];
+    data.sales.forEach(sg => {
+      const e = data.ebitda.find(x => x.name === sg.name);
+      const fs = sg.values[i], as = segAct("net sales by business area", sg.name);
+      const fe = e ? e.values[i] : null, ae = segAct("adjusted ebitda by business area", sg.name);
+      sales.push({ name: sg.name, f: fs, a: as });
+      ebitda.push({ name: sg.name, f: fe, a: ae });
+      margin.push({ name: sg.name, f: fs && fe != null ? fe / fs : null, a: as && ae != null ? ae / as : null, pp: true });
+    });
+    const fS = data.sales.reduce((s2, x) => s2 + v(x.values), 0) - v(data.lines.elim);
+    const fE = data.ebitda.reduce((s2, x) => s2 + v(x.values), 0) - v(data.lines.central);
+    const aS = A.quarterly.value("net sales", Q), aE = A.quarterly.value("adjusted ebitda", Q);
+    sales.push({ name: "Group", f: fS, a: aS, total: true });
+    ebitda.push({ name: "Group", f: fE, a: aE, total: true });
+    margin.push({ name: "Group", f: fS ? fE / fS : null, a: aS && aE != null ? aE / aS : null, pp: true, total: true });
+    let fcfF = null;
+    try { fcfF = MMModels.computeValuation(data).fcf[i]; } catch (e) { fcfF = null; }
+    const cash = [{ name: "Group", f: fcfF, a: A.quarterly.value("free cash flow, mr. market definition", Q), total: true }];
+    const dev = r => r.f == null || r.a == null ? null : r.pp ? (r.a - r.f) * 100 : r.f > 0 ? r.a / r.f - 1 : null;
+    [sales, ebitda, margin, cash].forEach(g => g.forEach(r => { r.d = dev(r); }));
+    return { sales, ebitda, margin, cash };
+  }
+  function fvaBlock(title, rows, h, pop) {
+    const pp = rows[0] && rows[0].pp, band = pp ? 0.5 : 0.02;
+    const vals = rows.map(r => r.d).filter(x => x != null);
+    if (!rows.length) return "";
+    const max = Math.max(band * 2.5, ...vals.map(Math.abs), 0) * 1.08;
+    const pos = x => 50 + Math.max(-50, Math.min(50, x / max * 50));
+    const lbl = x => { const v = pp ? Math.abs(x) : Math.abs(x * 100), t = v.toFixed(1), sign = t === "0.0" ? "" : x >= 0 ? "+" : "−"; return pp ? `${sign}${t} pp` : `${sign}${t}%`; };
+    const num = x => x == null ? "–" : pp ? (x * 100).toFixed(1) + "%" : h.fmt(x, 0);
+    const bandL = pos(-band), bandW = pos(band) - pos(-band);
+    const cat = pop ? `<button class="fva-cat clickable" data-action="fva-pop" data-cat="${pop}" aria-label="What drove ${h.esc(title)}"><span>${h.esc(title)}</span><span class="fva-more">›</span></button>` : `<div class="fva-cat">${h.esc(title)}</div>`;
+    return `<div class="fva-group">${cat}<div class="fva-rows">` + rows.map(r => {
+      const has = r.d != null, inLine = has && Math.abs(r.d) <= band, col = !has || inLine ? "#8A929E" : r.d > 0 ? GREEN : REDB;
+      return `<div class="fva-row${r.total ? " total" : ""}" title="${h.esc(r.name)}: forecast ${num(r.f)}, actual ${num(r.a)}">
+        <span class="fva-lab">${h.esc(r.name)}</span>
+        <span class="fva-track"><span class="fva-line"></span><span class="fva-band" style="left:${bandL}%;width:${bandW}%"></span><span class="fva-zero"></span>
+          ${has ? `<span class="fva-mark" style="left:${pos(r.d)}%;background:${col}"></span>` : ""}</span>
+        <span class="fva-val" style="color:${col}">${has ? lbl(r.d) : "–"}</span>
+        <span class="fva-num">${num(r.f)} → ${num(r.a)}</span></div>`;
+    }).join("") + `</div></div>`;
+  }
 
-/* ---------- step 3: auto versions ---------- */
-.auto-badge{display:inline-block;background:#E6EAF2;color:#13307A;font-size:11px;font-weight:600;border-radius:999px;padding:1px 7px;margin-right:6px;vertical-align:1px}
-.cp-banner-acts{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
-.pill.sm{padding:6px 12px;font-size:13.5px;background:var(--surface)}
-.fva-cat small{display:block;font-weight:400;color:var(--muted);font-size:11.5px}
-.fva-vb .chart-svg{max-width:680px}
-@media (max-width:820px){.cp-banner{flex-wrap:wrap}.cp-banner-acts{margin-left:0}}
-.fva-vb{min-width:0}
-.fva-cat{flex-direction:column}
-.cp-banner-acts{flex:none;flex-wrap:nowrap}
-@media (max-width:820px){.cp-banner-acts{flex-wrap:wrap}}
+  /* ================= "what drove it" pop-ups ================= */
+  const prevYear = Q => Q.replace(/(\d{4})$/, y => String(+y - 1));
+  // bridge chart: start total → deltas (green helped, red hurt) → end total; optional dashed marker line
+  function bridge(steps, h, marker, dec = 0, zoom = false) {
+    const W = 680, H = zoom ? 240 : 300, l = 10, r = 10, t = 30, b = 46, cw = W - l - r, ch = H - t - b;
+    let run = 0; const bars = steps.map(st => {
+      if (st.total) { run = st.value; return { ...st, from: 0, to: st.value }; }
+      const o = { ...st, from: run, to: run + st.value }; run += st.value; return o;
+    });
+    const all = bars.flatMap(x => [x.from, x.to]).concat(marker ? [marker.value] : []);
+    let hi = Math.max(...all) * 1.08, lo = Math.min(0, ...all);
+    if (zoom) {
+      const pts = bars.flatMap(x => x.total ? [x.to] : [x.from, x.to]), mn = Math.min(...pts), mx = Math.max(...pts), span = (mx - mn) || mx * 0.05;
+      lo = Math.max(0, mn - span * 1.2); hi = mx + span * 0.35;
+    }
+    const y = v => t + (hi - v) / (hi - lo) * ch, bw = cw / bars.length;
+    let g = `<line x1="${l}" x2="${W - r}" y1="${y(zoom ? lo : 0)}" y2="${y(zoom ? lo : 0)}" stroke="var(--line)"/>`;
+    bars.forEach((x, i) => {
+      const top = y(Math.max(x.from, x.to)), bot = x.total && zoom ? y(lo) : y(Math.min(x.from, x.to)), xc = l + bw * (i + 0.5), w = bw * 0.56;
+      const col = x.total ? (x.start ? LIGHT : NAVY) : x.value >= 0 ? GREEN : REDB;
+      g += `<rect x="${xc - w / 2}" y="${top}" width="${w}" height="${Math.max(1, bot - top)}" fill="${col}"/>`;
+      g += label(xc, top - 7, (x.total ? "" : x.value >= 0 ? "+" : "−") + h.fmt(Math.abs(x.value), dec));
+      x.label.split("\n").forEach((part, j) => { g += label(xc, H - b + 20 + j * 15, h.esc(part), { fill: "var(--muted)" }); });
+    });
+    if (marker) {
+      const my = y(marker.value);
+      g += `<line x1="${l}" x2="${W - r}" y1="${my}" y2="${my}" stroke="var(--ink)" stroke-dasharray="4 4" opacity=".55"/>` +
+           label(l + 4, my - 6, `${h.esc(marker.label)} ${h.fmt(marker.value, 0)}`, { anchor: "start", size: 11.5, fill: "var(--muted)" });
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img">${g}</svg>`;
+  }
+  // paired horizontal bars: your forecast (light) vs actual (navy) per item
+  function pairs(items, h, fmtv) {
+    const max = Math.max(...items.flatMap(x => [Math.abs(x.f || 0), Math.abs(x.a || 0)]), 1);
+    const w = v => Math.abs(v || 0) / max * 100;
+    return `<div class="pp">` + items.map(x => `<div class="pp-row"><span class="pp-lab">${h.esc(x.name)}</span>
+      <span class="pp-bars"><span class="pp-bar f" style="width:${w(x.f)}%"></span><span class="pp-bar a" style="width:${w(x.a)}%"></span></span>
+      <span class="pp-val"><span class="dim">${fmtv(x.f)}</span><b>${fmtv(x.a)}</b></span></div>`).join("") + `</div>`;
+  }
+  // diverging bars around zero, two series per row
+  function diverging(items, keys, h) {
+    const max = Math.max(...items.flatMap(x => keys.map(k => Math.abs(x[k.key] || 0))), 1);
+    return `<div class="dv">` + items.map(x => `<div class="dv-row"><span class="dv-lab">${h.esc(x.name)}</span><span class="dv-cells">` +
+      keys.map(k => { const v = x[k.key] || 0, wd = Math.abs(v) / max * 50;
+        const t = h.fmt(Math.abs(v), 0);
+        return `<span class="dv-cell"><span class="dv-track"><span class="dv-zero"></span><span class="dv-bar" style="${v >= 0 ? `left:50%` : `right:50%`};width:${wd}%;background:${v >= 0 ? k.pos : k.neg}"></span></span><span class="dv-v">${t === "0" ? "0" : (v >= 0 ? "+" : "−") + t}</span></span>`; }).join("") +
+      `</span></div>`).join("") + `</div>`;
+  }
+  const legendHtml = items => `<div class="legend kc-legend pop-legend">${items.map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join("")}</div>`;
 
-/* ---------- outdated forecasts (quarter reported, model not updated) ---------- */
-table.assump td.outdated{color:var(--amber);background:var(--amber-soft)}
-table.assump th.outdated{color:var(--amber);background:var(--amber-soft);white-space:normal;min-width:120px}
-table.assump th.outdated small{display:block;font-weight:500;font-size:11px;line-height:1.25;margin-top:2px}
-.pill.sm.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
-.cp-banner a{color:var(--blue)}
-@media (max-width:820px){.cp-banner-acts{flex:1 1 100%;flex-wrap:wrap}.cp-banner-acts .pill.sm{white-space:normal;text-align:left}}
+  function fvaPopup(cat, ctx) {
+    const { h, actuals: A } = ctx, c = ctx.comparison;
+    if (!c || !c.data || !A || !A.quarterly) return null;
+    const Q = c.selected, data = c.data, P = data.periods, i = P.findIndex(p => p.label === Q);
+    if (i < 0) return null;
+    const v = arr => (arr && arr[i] != null ? arr[i] : 0), S = A.segments, LY = prevYear(Q);
+    const res = MMModels.computeValuation(data), q = k => A.quarterly.value(k, Q);
+    if (cat === "sales") {
+      const act = q("net sales"), ly = A.quarterly.value("net sales", LY), acq = q("acquired sales"), fx = q("currency effect");
+      const fS = res.sales[i];
+      let chart;
+      if (act != null && ly != null && acq != null && fx != null) {
+        const org = act - ly - acq - fx;
+        chart = bridge([{ label: LY, value: ly, total: true, start: true }, { label: "Organic", value: org }, { label: "Acquisitions", value: acq },
+          { label: "Currency", value: fx }, { label: Q, value: act, total: true }], h, { value: fS, label: "Your forecast" });
+      } else chart = `<p class="dim">The split into organic growth and acquisitions is not available for ${h.esc(Q)}</p>`;
+      const rows = data.sales.map(sg => {
+        const lyS = S ? S.seg("net sales by business area", sg.name, LY) : null, aS = S ? S.seg("net sales by business area", sg.name, Q) : null;
+        const org = S ? S.seg("organic growth by business area", sg.name, Q) : null;
+        return { name: sg.name, f: lyS ? sg.values[i] / lyS - 1 : null, a: lyS && aS != null ? aS / lyS - 1 : null, org };
+      });
+      const max = Math.max(...rows.flatMap(r => [Math.abs(r.f || 0), Math.abs(r.a || 0)]), 0.05);
+      const pc = x => { if (x == null) return "–"; const t = Math.abs(x * 100).toFixed(0); return t === "0" ? "0%" : `${x >= 0 ? "+" : "−"}${t}%`; };
+      const growth = `<div class="gr">` + rows.map(r => {
+        const w = x => Math.max(0, (x || 0)) / max * 100, orgW = w(Math.min(r.org ?? r.a, r.a)), totW = w(r.a);
+        return `<div class="gr-row"><span class="gr-lab">${h.esc(r.name)}</span><span class="gr-track">
+          <span class="gr-bar org" style="width:${orgW}%"></span><span class="gr-bar acq" style="left:${orgW}%;width:${Math.max(0, totW - orgW)}%"></span>
+          ${r.f != null ? `<span class="gr-tick" style="left:${w(r.f)}%"></span>` : ""}</span>
+          <span class="gr-val"><b>${pc(r.a)}</b><span class="dim">${r.org != null ? "organic " + pc(r.org) + " · " : ""}forecast ${pc(r.f)}</span></span></div>`;
+      }).join("") + `</div>`;
+      return { title: `Net sales ${Q}`, html: `<h4 class="pop-h">Sales vs ${h.esc(LY)}</h4>${chart}
+        <h4 class="pop-h">Growth vs ${h.esc(LY)} by business area</h4>${legendHtml([[NAVY, "Organic"], ["#5B8FD1", "Acquisitions & currency"], ["var(--ink)", "Your forecast"]])}${growth}` };
+    }
+    if (cat === "ebitda") {
+      const rows = data.sales.map(sg => {
+        const e = data.ebitda.find(x => x.name === sg.name), fS = sg.values[i], fE = e ? e.values[i] : null, fM = fS ? fE / fS : 0;
+        const aS = S ? S.seg("net sales by business area", sg.name, Q) : null, aE = S ? S.seg("adjusted ebitda by business area", sg.name, Q) : null;
+        return { name: sg.name, volume: aS != null ? (aS - fS) * fM : 0, margin: aE != null && aS != null ? aE - aS * fM : 0 };
+      });
+      const fE = res.ebitda[i], aE = q("adjusted ebitda");
+      const vol = rows.reduce((s2, r) => s2 + r.volume, 0), mar = rows.reduce((s2, r) => s2 + r.margin, 0);
+      const other = aE != null ? aE - fE - vol - mar : 0;
+      const chart = bridge([{ label: "Your\nforecast", value: fE, total: true, start: true }, { label: "Higher/lower\nsales", value: vol },
+        { label: "Margin", value: mar }, { label: "Central costs\n& other", value: other }, { label: "Actual", value: aE, total: true }], h);
+      return { title: `Adjusted EBITDA ${Q}`, html: `<h4 class="pop-h">From your forecast to actual</h4>${chart}
+        <h4 class="pop-h">By business area</h4>${legendHtml([["#7FB89A", "Sales effect"], [GREEN, "Margin effect"]])}
+        ${diverging(rows, [{ key: "volume", pos: "#7FB89A", neg: "#E3A39E" }, { key: "margin", pos: GREEN, neg: REDB }], h)}
+        <ul class="kc-notes"><li>Sales effect: sales difference at your forecast margin · Margin effect: margin difference on actual sales</li></ul>` };
+    }
+    if (cat === "cash") {
+      const rate = (tax, pbt) => (pbt > 0 ? Math.min(0.4, Math.max(0, tax / pbt)) : 0);
+      const f = { ebitda: res.ebitda[i], tax: res.ebit[i] * Math.min(0.4, Math.max(0, res.taxRate[i] || 0)), capex: v(data.lines.capex), wc: v(data.lines.nwc) };
+      const ebit = q("ebit"), dep = q("depreciation"), am = q("amortisation"), tx = q("income tax"), pbt = q("profit before tax");
+      const a = { ebitda: ebit != null ? ebit + (dep || 0) + (am || 0) : null, tax: ebit != null ? ebit * rate(tx || 0, pbt || 0) : null, capex: q("capex"), wc: q("increase in working capital (cash flow)") };
+      if ([a.ebitda, a.tax, a.capex, a.wc].some(x => x == null)) return { title: `Free cash flow ${Q}`, html: `<p class="dim">Not all cash flow items are available for ${h.esc(Q)}</p>` };
+      const fF = f.ebitda - f.tax - f.capex - f.wc, aF = a.ebitda - a.tax - a.capex - a.wc;
+      const chart = bridge([{ label: "Your\nforecast", value: fF, total: true, start: true }, { label: "EBITDA", value: a.ebitda - f.ebitda },
+        { label: "Tax", value: -(a.tax - f.tax) }, { label: "Capex", value: -(a.capex - f.capex) }, { label: "Working\ncapital", value: -(a.wc - f.wc) },
+        { label: "Actual", value: aF, total: true }], h);
+      const fm = x => (x < 0 ? "−" : "") + h.fmt(Math.abs(x), 0);
+      return { title: `Free cash flow ${Q}`, html: `<h4 class="pop-h">From your forecast to actual</h4>${chart}
+        <h4 class="pop-h">Forecast vs actual per item</h4>${legendHtml([[LIGHT, "Your forecast"], [NAVY, "Actual"]])}
+        ${pairs([{ name: "EBITDA", f: f.ebitda, a: a.ebitda }, { name: "Tax on EBIT", f: f.tax, a: a.tax }, { name: "Capex", f: f.capex, a: a.capex },
+                 { name: "Working capital", f: f.wc, a: a.wc }], h, fm)}
+        <ul class="kc-notes"><li>Free cash flow = EBITDA − tax on EBIT − capex − increase in working capital (negative = released)</li></ul>` };
+    }
+    return null;
+  }
 
-/* ---------- one update journey ---------- */
-.rv-apply{display:flex;gap:10px;align-items:flex-start;background:var(--amber-soft);border-radius:12px;padding:12px 14px;margin:0 0 14px;cursor:pointer;font-size:14px}
-.rv-apply input{margin-top:3px;width:18px;height:18px;accent-color:var(--blue)}
-.cp-hint{margin:12px 0 0;font-size:13.5px;color:var(--muted)}
-.cp-hint .link-btn{padding:0;font-size:13.5px}
-.cp-banner .link-btn.sm{padding:4px 0 0;font-size:13px}
+  function compareCard(ctx) {
+    const { h } = ctx, c = ctx.comparison;
+    if (!c) return "";
+    if (!c.list.length) return `<section class="card cp-chart kc"><div class="kc-title"><h2>Forecast vs actual</h2></div><p class="dim">Appears here after the next report, comparing your forecast with what the company reports</p></section>`;
+    const sel = c.list.find(x => x.quarter === c.selected) || c.list[0];
+    const chips = c.list.map(x => `<button data-action="fva-q" data-q="${h.esc(x.quarter)}" aria-pressed="${x.quarter === sel.quarter}">${h.esc(x.quarter)}</button>`).join("");
+    const legend = `<span><i class="band"></i>In line</span><span><i style="background:${GREEN}"></i>Above your forecast</span><span><i style="background:${REDB}"></i>Below</span>`;
+    let body;
+    if (!c.data) body = `<p class="dim">Loading your forecast…</p>`;
+    else {
+      const rows = compareRows(c.data, ctx.actuals, sel.quarter);
+      if (!rows) body = `<p class="dim">No forecast for ${h.esc(sel.quarter)} in that model version</p>`;
+      else {
+        body = `<div class="fva-cols"><span></span><span></span><span class="fva-axis"><span>Below forecast</span><span>Above forecast</span></span><span></span><span class="fva-num-h">Forecast → actual</span></div>
+          ${fvaBlock("Net sales", rows.sales, h, "sales")}${fvaBlock("Adj. EBITDA", rows.ebitda, h, "ebitda")}${fvaBlock("EBITDA margin", rows.margin, h)}${fvaBlock("Free cash flow", rows.cash, h, "cash")}`;
+        const vb = c.bridge;
+        if (vb) body += `<div class="fva-group"><div class="fva-cat">Your value<small>SEK per share${c.preview ? `<br>if ${h.esc(sel.quarter.split(" ")[0])} actuals are applied` : ""}</small></div><div class="fva-vb">${bridge([
+          { label: `Your model\n(${h.esc(sel.version.basis || "")})`, value: vb.base, total: true, start: true }, { label: "Time\n(3 months)", value: vb.time },
+          { label: `${h.esc(sel.quarter)}\ncash flow`, value: vb.cash }, { label: "Other balance\nsheet items", value: vb.other },
+          { label: `With ${h.esc(sel.quarter)}\nactuals`, value: vb.final, total: true }], h, null, 2, true)}</div></div>`;
+      }
+    }
+    const v = sel.version, up = v.uploadedAt ? h.fmtDate(v.uploadedAt.slice(0, 10)) : "–";
+    return `<section class="card cp-chart kc" id="fva">
+      <div class="kc-title"><h2>Forecast vs actual</h2><span class="unit">SEK m</span></div>
+      <div class="kc-bar"><div class="seg kc-tabs" role="group" aria-label="Quarter">${chips}</div><div class="legend kc-legend">${legend}</div></div>
+      ${body}
+      <ul class="kc-notes"><li>Your forecast: model uploaded ${up}, based on ${h.esc(v.basis || "–")}</li><li>Actual: as reported${sel.reportDate ? " on " + h.fmtDate(sel.reportDate) : ""}, adjusted EBITDA excluding one-offs</li><li>In line: within ±2%, or ±0.5 pp for margins</li><li>Free cash flow on the same definition as your forecast</li></ul>
+    </section>`;
+  }
+
+  function render(el, ctx) {
+    const { s, h, latest, data, result, versions, hasTemplate, connected } = ctx;
+    const st = ctx.status || {};
+    const loadingModels = connected && st.models === "loading", modelsFailed = connected && st.models === "error";
+    const nf = (v, d) => v == null || !isFinite(v) ? "–" : h.fmt(v, d);
+    const day = v => v ? h.fmtDate(String(v).slice(0, 10)) : "–";
+    const up = latest && s.price ? latest.valuePerShare / s.price - 1 : null;
+    const nextRep = s.report ? `next report ${h.fmtDate(s.report)}${h.daysTo(s.report) >= 0 ? ` (in ${h.daysTo(s.report)} days)` : ""}` : "";
+    let html = `<a href="#/" class="back">‹ Watchlist</a>
+    <div class="cp-head">
+      <div class="cp-title">${h.flag(s.country)}<div><h1>${h.esc(s.name)}</h1><small>${h.esc(s.ticker)}${nextRep ? " · " + nextRep : ""}</small></div></div>
+    </div>
+    <div class="cp-stats">
+      <div class="stat"><small>Your value</small><b>${latest ? nf(latest.valuePerShare) : "–"}</b><span class="dim">${latest ? (latest.applied ? `incl. ${h.esc(latest.basis)} actuals` : "SEK per share") : loadingModels ? "loading…" : modelsFailed ? "could not load" : "no model yet"}</span></div>
+      <div class="stat"><small>Share price</small><b>${s.price != null ? h.fmt(s.price) : "–"}</b><span class="${s.day >= 0 ? "pos" : "neg"}">${s.day != null ? h.pct(s.day, 2) + " today" : ""}</span></div>
+      <div class="stat ${up == null ? "" : up >= 0 ? "stat-up" : "stat-down"}"><small>Upside</small><b>${up == null ? "–" : h.pct(up)}</b><span class="dim">${up == null ? "" : up >= 0 ? "your value is above the price" : "your value is below the price"}</span></div>
+      <div class="stat${s.modelStatus && s.modelStatus.kind === "update" ? " stat-warn" : ""}"><small>Model</small><b class="stat-text">${latest ? "Based on " + h.esc(latest.basis || "–") : loadingModels ? "Loading…" : modelsFailed ? "Not loaded" : "No model yet"}</b><span class="${s.modelStatus && s.modelStatus.kind === "update" ? "upd-text" : "dim"}">${latest ? (s.modelStatus && s.modelStatus.kind === "update" ? h.esc(s.modelStatus.short) : "uploaded " + day(latest.uploadedAt)) : ""}</span></div>
+    </div>`;
+    // a new report since the model: short banner
+    if (false) {
+    } else if (latest && s.modelStatus && s.modelStatus.kind === "update" && s.lastReport) {
+      const lr = s.lastReport, ap = ctx.apply;
+      const q = ap ? ap.quarter.split(" ")[0] : lr.quarter.split(" ")[0];
+      const main = ap && !ap.error
+        ? `<button class="pill sm primary" data-action="apply-actuals">Update to ${h.esc(q)} actuals · ${h.fmt(ap.from)} → ${h.fmt(ap.to)}</button>`
+        : `<button class="pill sm primary" data-action="upload">Upload your updated model</button>`;
+      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(s.name)} published its ${h.esc(lr.quarter)} report on ${h.fmtDate(lr.date)}.</b> Your model still uses forecasts for ${h.esc(lr.quarter)}.${ap && ap.error ? ` <span class="dim">${h.esc(ap.error)}.</span>` : ""}${lr.url ? ` <a href="${h.esc(lr.url)}" target="_blank" rel="noopener">Read report</a>` : ""}
+        ${ap && !ap.error ? `<br><button class="link-btn sm" data-action="upload">Already updated your model yourself? Upload it</button>` : ""}</span>
+        <span class="cp-banner-acts">${main}</span></section>`;
+    }
+
+    // ---- model card
+    const histBtn = ctx.hasActuals ? `<button class="pill" data-action="download-actuals"><svg><use href="#i-down"/></svg>Download historical financials</button>` : "";
+    const tplBtn = hasTemplate
+      ? `<button class="pill" data-action="download-template"><svg><use href="#i-down"/></svg>Download transfer sheet</button>`
+      : `<span class="dim small">No transfer sheet developed yet for this company</span>`;
+    html += `<section class="card cp-model"><div class="cp-model-head"><h2>Your model</h2></div>`;
+    if (modelsFailed) {
+      html += errorBox(h, "Your models could not be loaded from GitHub.", st.modelsErr || "");
+    } else if (loadingModels && !latest) {
+      html += `<p class="dim">Loading your models…</p>`;
+    } else if (latest) {
+      html += `<p class="cp-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${h.esc(latest.fileName || "Model")}</b><br><span class="dim small">${latest.applied ? "Updated" : "Uploaded"} ${day(latest.uploadedAt)} · based on ${h.esc(latest.basis || "–")} · template ${h.esc(latest.templateVersion || "–")}</span></span></p>
+      <div class="cp-actions"><button class="pill primary" data-action="upload"><svg><use href="#i-up"/></svg>Upload new version</button>
+      <button class="pill" data-action="download-model"><svg><use href="#i-down"/></svg>Download my model</button>${tplBtn}${histBtn}</div>
+      ${latest.applied ? `<p class="cp-hint">Updated with ${h.esc(latest.basis)} actuals. Want to review your assumptions? <button class="link-btn" data-action="download-model">Download your updated model</button>, change what you like and upload it again</p>` : ""}`;
+    } else {
+      html += `<ol class="steps">
+        <li><b>Download the transfer sheet</b> for ${h.esc(s.name)}. ${hasTemplate ? "" : "<span class='dim'>(not available yet)</span>"}</li>
+        <li><b>Copy it into your DCF</b> in Excel, link the orange cells and save.</li>
+        <li><b>Upload your model</b>. Mr. Market checks it and shows your value per share.</li></ol>
+      <div class="cp-actions"><button class="pill primary" data-action="upload"><svg><use href="#i-up"/></svg>Upload model</button>${tplBtn}${histBtn}</div>`;
+    }
+    if (!connected) html += `<p class="note">Connect GitHub under Settings to store models and transfer sheets.</p>`;
+    html += `</section>`;
+
+    // ---- key chart: history + your forecast (switchable)
+    if (st.actualsErr) html += `<section class="card cp-chart">${errorBox(h, "Historical financials could not be loaded.", st.actualsErr)}</section>`;
+    html += safe("The chart", h, () => buildKeyChart(ctx));
+
+    // ---- visuals from the latest model
+    if (data && result) {
+      const P = data.periods, fc = P.map(p => p.status.toLowerCase() === "forecast");
+      const yi = P.map((p, i) => i).filter(i => fc[i] && P[i].kind === "FY");
+      html += safe("The valuation", h, () => valuationCard(ctx));
+      html += safe("Key assumptions", h, () => {
+      let html = "";
+
+      // key assumptions table
+      const cols = P.map((p, i) => i).filter(i => fc[i]);
+      const qi = lab => { const m = /^Q([1-4])\s+(\d{4})$/.exec(String(lab || "")); return m ? +m[2] * 4 + +m[1] : null; };
+      const lr = s.lastReport, out = new Set(cols.filter(i => lr && P[i].kind === "Q" && qi(P[i].label) != null && qi(P[i].label) <= qi(lr.quarter)));
+      let ci = 0;
+      const cell = (v, f) => { const i = cols[ci++ % cols.length]; return `<td class="${out.has(i) ? "outdated" : ""}">${v == null || !isFinite(v) ? "<span class='dim'>–</span>" : f(v)}</td>`; };
+      const pctf = v => (v * 100).toFixed(1) + "%";
+      const rows = [];
+      rows.push(["Net sales, SEK m", cols.map(i => cell(result.sales[i], v => h.fmt(v, 0))), "strong"]);
+      rows.push(["Sales growth", cols.map(i => { const prev = yi.indexOf(i) > 0 ? yi[yi.indexOf(i) - 1] : null; return cell(prev != null ? result.sales[i] / result.sales[prev] - 1 : null, pctf); })]);
+      data.ebitda.forEach(sg => {
+        const sv = data.sales.find(x => x.name === sg.name);
+        rows.push([`EBITDA margin ${h.esc(sg.name)}`, cols.map(i => cell(sv && sv.values[i] ? sg.values[i] / sv.values[i] : null, pctf))]);
+      });
+      rows.push(["EBITDA margin, group", cols.map(i => cell(result.sales[i] ? result.ebitda[i] / result.sales[i] : null, pctf)), "strong"]);
+      rows.push(["EBIT margin", cols.map(i => cell(result.sales[i] ? result.ebit[i] / result.sales[i] : null, pctf))]);
+      rows.push(["Capex % of sales", cols.map(i => cell(result.sales[i] ? result.capex[i] / result.sales[i] : null, pctf))]);
+      rows.push(["Tax rate", cols.map(i => cell(result.taxRate[i], pctf))]);
+      rows.push(["Free cash flow, SEK m", cols.map(i => cell(result.fcf[i], v => h.fmt(v, 0))), "strong"]);
+      const inp = data.inputs, tv = String(inp.method || "").toLowerCase() === "terminal growth" ? `terminal growth ${pctf(inp.growth)}` : `exit multiple ${h.fmt(inp.multiple, 1)}x EV/EBITDA`;
+      html += `<section class="card cp-chart"><h2>Key assumptions</h2><p class="sub">From your model. WACC ${pctf(inp.wacc)}, ${tv}.</p>
+        <div class="tbl-scroll"><table class="assump"><thead><tr><th>SEK m / %</th>${cols.map(i => `<th class="${out.has(i) ? "outdated" : ""}">${h.esc(P[i].label)}${out.has(i) ? `<small>Outdated values · actuals reported ${h.esc(h.fmtDate(lr.date).replace(/ \d{4}$/, ""))}</small>` : ""}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map(([lab, cells, cls]) => `<tr class="${cls || ""}"><th>${lab}</th>${cells.join("")}</tr>`).join("")}</tbody></table></div></section>`;
+      return html;
+      });
+    } else if (latest && connected) {
+      html += st.modelDataErr
+        ? `<section class="card cp-chart">${errorBox(h, "Your model could not be loaded.", st.modelDataErr)}</section>`
+        : `<section class="card cp-chart"><p class="dim">Loading your model…</p></section>`;
+    }
+
+    // ---- version history
+    if (latest) html += safe("Forecast vs actual", h, () => compareCard(ctx));
+    html += safe("Version history", h, () => { let html = ""; if (versions.length) {
+      html += `<section class="card cp-chart"><h2>Version history</h2><p class="sub">Every upload is kept, so you can follow how your view has changed.</p>
+      <div class="tbl-scroll"><table class="versions"><thead><tr><th>Uploaded</th><th>Based on</th><th>Value per share</th><th>Change</th><th>File</th><th></th></tr></thead><tbody>
+      ${versions.map((v, i) => {
+        const prev = versions[i + 1], ch = prev && prev.valuePerShare ? v.valuePerShare / prev.valuePerShare - 1 : null;
+        return `<tr><td>${day(v.uploadedAt)}</td><td>${h.esc(v.basis || "–")}</td><td>${nf(v.valuePerShare)}</td>
+        <td>${ch == null ? "<span class='dim'>first</span>" : `<span class="${ch >= 0 ? "pos" : "neg"}">${h.pct(ch)}</span>`}</td>
+        <td class="file">${v.applied ? `<span class="auto-badge">Actuals applied</span>` : ""}${h.esc(v.fileName)}${v.note ? `<small class="vnote">${h.esc(v.note)}</small>` : ""}</td><td><button class="link-btn" data-action="download-version" data-path="${h.esc(v.xlsx)}" data-name="${h.esc(v.fileName)}">Download</button></td></tr>`;
+      }).join("")}</tbody></table></div></section>`;
+    } return html; });
+    el.innerHTML = `<div class="cp">${html}</div>`;
+  }
+
+  window.MMCompany = { VERSION: "0.28", render, updateValuation, impliedWacc, fvaPopup };
+})();

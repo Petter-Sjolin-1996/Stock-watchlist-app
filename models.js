@@ -253,7 +253,8 @@
   function computeValuation(model) {
     const P = model.periods, L = model.lines, I = model.inputs;
     const v = (arr, i) => (arr && arr[i] != null ? arr[i] : 0);
-    const rep = P.filter(p => p.kind === "Q" && norm(p.status) === "reported").length;
+    const fq = P.filter(p => p.kind === "Q" && norm(p.status) === "forecast");
+    const rep = fq.length ? Math.min(...fq.map(p => p.q)) - 1 : 4;
     const out = { sales: [], ebitda: [], ebit: [], fcf: [], t: [], df: [], pv: [], taxRate: [], capex: [], forecast: [] };
     let year = 0;
     P.forEach((p, i) => {
@@ -349,14 +350,12 @@
       capex: qv("capex"), nwc: qv("increase in working capital (cash flow)"), hasData: qv("net sales") != null
     };
   }
-  // set the history columns of a model (JSON) to the 4 quarters ending with Q
-  function refreshHistory(m, A, Q) {
-    const idx = m.periods.map((p, i) => i).filter(i => norm(m.periods[i].status) === "actual");
-    if (!idx.length) return m;
-    const labels = quartersBack(Q, idx.length);
-    idx.forEach((i, k) => {
-      const h = historyRow(A, labels[k]);
-      m.periods[i].label = labels[k]; m.periods[i].q = +labels[k][1];
+  // fill every reported (actual) quarter of a model (JSON) with the official figures
+  function refreshHistory(m, A) {
+    m.periods.forEach((p, i) => {
+      if (norm(p.status) !== "actual" || p.kind !== "Q") return;
+      const h = historyRow(A, p.label);
+      if (!h.hasData) return;
       m.sales.forEach(sg => { sg.values[i] = h.sales(sg.name); });
       m.ebitda.forEach(sg => { sg.values[i] = h.ebitda(sg.name); });
       ["elim", "central", "dep", "amort", "fin", "tax", "capex", "nwc"].forEach(k2 => { if (m.lines[k2]) m.lines[k2][i] = h[k2]; });
@@ -365,14 +364,13 @@
   }
   // option 1 check: does the history in the user's sheet match the reported figures?
   function compareHistory(model, A) {
-    const out = { diffs: [], empty: 0, stale: false };
-    const idx = model.periods.map((p, i) => i).filter(i => norm(model.periods[i].status) === "actual");
-    if (!idx.length || !A) return out;
-    out.stale = model.basis && model.periods[idx[idx.length - 1]].label !== model.basis;
-    if (out.stale) return out;
+    const out = { diffs: [], empty: 0 };
+    if (!A) return out;
     const f = x => Math.round(x).toLocaleString("en-US");
-    idx.forEach(i => {
-      const Q = model.periods[i].label, h = historyRow(A, Q);
+    model.periods.forEach((p, i) => {
+      if (norm(p.status) !== "actual" || p.kind !== "Q") return;
+      const Q = p.label, h = historyRow(A, Q);
+      if (!h.hasData) return;
       const check = (what, u, o) => {
         if (u == null) { if (o != null) out.empty++; return; }
         if (o != null && Math.abs(u - o) > Math.max(1, Math.abs(o) * 0.01)) out.diffs.push(`${Q} ${what}: ${f(u)} in your sheet, ${f(o)} reported`);
@@ -400,7 +398,8 @@
     const clone = x => JSON.parse(JSON.stringify(x));
     // value bridge, one change at a time
     const base = computeValuation(model), sh0 = model.inputs.shares;
-    const mA = clone(model); mA.periods[i].status = "Reported";
+    const layoutB = model.periods.some(p => norm(p.status) === "actual");
+    const mA = clone(model); mA.periods[i].status = layoutB ? "Actual" : "Reported";
     const v1 = computeValuation(mA).vps;
     const cashRemoved = -(base.pv[i] || 0) / sh0, time = v1 - base.vps - cashRemoved;
     const mB = clone(mA); mB.inputs.netDebt = bs.netDebt;
@@ -414,8 +413,8 @@
     set("central", S ? S.seg("adjusted ebitda by business area", "central costs & eliminations", Q) : null);
     set("dep", qv("depreciation")); set("amort", qv("amortisation")); set("fin", qv("net financial costs"));
     set("tax", qv("income tax")); set("capex", qv("capex")); set("nwc", qv("increase in working capital (cash flow)"));
-    m.latestQuarter = "Q" + m.periods[i].q; m.basis = Q;
-    refreshHistory(m, A, Q);
+    m.latestQuarter = layoutB ? Q : "Q" + m.periods[i].q; m.basis = Q;
+    refreshHistory(m, A);
     const fin = computeValuation(m);
     m.valueBridge = { quarter: Q, base: base.vps, time, cash: cashRemoved + (v2 - v1), other: fin.vps - v2, final: fin.vps };
     return { model: m, result: fin };
@@ -477,10 +476,26 @@
     const [a, b] = range.split(":"); const r = refParts(ref), A1 = refParts(a), B1 = refParts(b || a);
     return r.col >= A1.col && r.col <= B1.col && r.row >= A1.row && r.row <= B1.row;
   }
+  // move the relative references of a formula by (dc, dr), as Excel does when a formula is copied
+  function shiftFormula(f, dc, dr) {
+    if (/\[/.test(f)) throw new Error("external or table reference");
+    const bare = f.replace(/"[^"]*"|'[^']*'/g, "");
+    if (/(^|[^A-Za-z0-9_$])\$?[A-Z]{1,3}:\$?[A-Z]{1,3}(?![A-Za-z0-9_(])|(^|[^A-Za-z0-9_$:])\$?\d+:\$?\d+(?![0-9])/.test(bare)) throw new Error("whole-column or whole-row reference");
+    return f.replace(/("[^"]*"|'[^']*')|(\$?)([A-Z]{1,3})(\$?)(\d{1,7})(?![A-Za-z0-9_(])/g, (m0, quoted, c$, col, r$, row, off, str) => {
+      if (quoted) return quoted;
+      const prev = off > 0 ? str[off - 1] : "";
+      if (/[A-Za-z0-9_.$]/.test(prev)) return m0;
+      const nc = c$ ? colNum(col) : colNum(col) + dc, nr = r$ ? +row : +row + dr;
+      if (nc < 1 || nr < 1) throw new Error("reference out of range");
+      return `${c$}${colLetters(nc)}${r$}${nr}`;
+    });
+  }
   // edits: { "D22": {s: "Q3 2026"} | {v: 123} | {v: null} }
   function editSheetXml(xmlText, edits) {
     const pm = /<(\w+:)?sheetData[\s>/]/.exec(xmlText); if (!pm) throw new Error("Unexpected sheet format");
     const P = pm[1] || "", refs = Object.keys(edits);
+    const cellsOf = x => { const o = {}; for (const m of x.matchAll(new RegExp(`<${P}c r="([A-Z]+\\d+)"(?=[\\s>/])[^>]*?(?:/>|>[\\s\\S]*?</${P}c>)`, "g"))) o[m[1]] = m[0]; return o; };
+    const before = cellsOf(xmlText), expanded = new Set();
     const cellRe = ref => new RegExp(`<${P}c r="${ref}"(?=[\\s>/])[^>]*?(?:/>|>[\\s\\S]*?</${P}c>)`);
     const build = (ref, style, e) => {
       const s = style ? ` s="${style}"` : "";
@@ -488,19 +503,27 @@
       if (e.v == null || !isFinite(e.v)) return `<${P}c r="${ref}"${s}/>`;
       return `<${P}c r="${ref}"${s}><${P}v>${+(+e.v).toFixed(6)}</${P}v></${P}c>`;
     };
+    // a shared formula is stored once (in its first cell) and reused by the cells next to it:
+    // before that first cell is overwritten, every other cell of the group gets its own formula
+    const unshare = (masterRef, masterXml) => {
+      const fm = new RegExp(`<${P}f\\b([^>]*)>([\\s\\S]*?)</${P}f>`).exec(masterXml);
+      const si = (/\bsi="(\d+)"/.exec(fm[1]) || [])[1], text = fm[2].replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+      if (/\bt="array"/.test(fm[1])) throw new Error(`Cell ${masterRef} holds an array formula; the file was not changed`);
+      const M = refParts(masterRef);
+      for (const [ref, x] of Object.entries(cellsOf(xmlText))) {
+        if (ref === masterRef || edits[ref]) continue;
+        if (!new RegExp(`<${P}f\\b[^>]*\\bt="shared"[^>]*\\bsi="${si}"`).test(x) && !new RegExp(`<${P}f\\b[^>]*\\bsi="${si}"[^>]*\\bt="shared"`).test(x)) continue;
+        const R = refParts(ref), nf = shiftFormula(text, R.col - M.col, R.row - M.row);
+        const nx = x.replace(new RegExp(`<${P}f\\b[^>]*?(?:/>|>[\\s\\S]*?</${P}f>)`), `<${P}f>${escXml(nf)}</${P}f>`);
+        xmlText = xmlText.replace(x, nx); expanded.add(ref);
+      }
+    };
     for (const ref of refs) {
       const m = cellRe(ref).exec(xmlText);
       if (m) {
         const old = m[0], sm = / s="(\d+)"/.exec(old.slice(0, old.indexOf(">") + 1));
-        const shared = /<(?:\w+:)?f[^>]*\bt="(shared|array)"[^>]*\bref="([A-Z]+\d+(?::[A-Z]+\d+)?)"/.exec(old);
-        if (shared) {
-          const [a, b] = shared[2].split(":"), A1 = refParts(a), B1 = refParts(b || a);
-          for (let r = A1.row; r <= B1.row; r++) for (let c = A1.col; c <= B1.col; c++) {
-            const rr = colLetters(c) + r;
-            if (!edits[rr]) throw new Error(`Cell ${ref} starts a shared formula (${shared[2]}); the file was not changed`);
-          }
-        }
-        xmlText = xmlText.replace(old, build(ref, sm && sm[1], edits[ref]));
+        if (new RegExp(`<${P}f\\b[^>]*\\bref="`).test(old)) unshare(ref, old);
+        xmlText = xmlText.replace(cellRe(ref), build(ref, sm && sm[1], edits[ref]));
       } else {
         const { row, col } = refParts(ref);
         const rowRe = new RegExp(`<${P}row r="${row}"(?=[\\s>/])[^>]*?(/>|>[\\s\\S]*?</${P}row>)`);
@@ -523,7 +546,13 @@
         }
       }
     }
-    return xmlText;
+    // integrity check: every cell Mr. Market did not set must be exactly as before
+    const after = cellsOf(xmlText);
+    for (const [ref, x] of Object.entries(before)) {
+      if (edits[ref] || expanded.has(ref)) continue;
+      if (after[ref] !== x) throw new Error(`Cell ${ref} would have changed; the file was not changed`);
+    }
+    return { xml: xmlText, expanded: [...expanded] };
   }
   async function editWorkbookCells(buf, sheetName, edits) {
     const entries = zipEntries(buf), get = name => entries.find(e => e.name === name);
@@ -537,7 +566,8 @@
     if (!target) throw new Error("Sheet not found in the workbook");
     const path = target.startsWith("/") ? target.slice(1) : "xl/" + target.replace(/^\.\//, "");
     const shE = get(path); if (!shE) throw new Error("Sheet data not found");
-    await setEntryText(shE, editSheetXml(await entryText(shE), edits));
+    const res = editSheetXml(await entryText(shE), edits);
+    await setEntryText(shE, res.xml);
     // Excel recalculates everything when the file is opened
     if (/<(\w+:)?calcPr\b/.test(wbX)) wbX = wbX.replace(/<((?:\w+:)?calcPr)\b([^>]*?)(\/?)>/, (m0, tag, attrs, sl) => `<${tag}${attrs.replace(/\sfullCalcOnLoad="[^"]*"/, "")} fullCalcOnLoad="1"${sl}>`);
     else wbX = wbX.replace(/(<(?:\w+:)?extLst|<\/(?:\w+:)?workbook>)/, `<calcPr fullCalcOnLoad="1"/>$1`);
@@ -550,17 +580,19 @@
       const ctE = get("[Content_Types].xml");
       if (ctE) await setEntryText(ctE, (await entryText(ctE)).replace(/<Override [^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/, ""));
     }
-    return writeZip(entries);
+    return { blob: writeZip(entries), expanded: res.expanded };
   }
 
-  /* ---------- 8. put a reported quarter into a transfer sheet (Mr. Market's own cells only) ----------
-     opts.historyOnly: only the history columns (used when you upload your own update)
-     opts.onlyEmpty:   leave history cells you filled in yourself */
+  /* ---------- 8. put a reported quarter into a transfer sheet (Mr. Market's cells only) ----------
+     Apply (default): the reported quarter's cells get the official figures (your links in that quarter are replaced,
+       the quarter is done), "Latest reported quarter" and the balance sheet move to the quarter end, and any empty
+       earlier reported cells are filled in.
+     opts.historyOnly: only fill empty reported cells up to Q (used when you upload your own update). */
   async function applyQuarterToSheet(buf, A, Q, opts = {}) {
     const wb = await readWorkbook(buf), ws = await wb.sheet("Transfer sheet");
     if (!ws) return { error: 'No sheet called "Transfer sheet"' };
     const B = r => norm(ws.cell("B", r).v);
-    let headerRow = 0, statusRow = 0, latestRow = 0, fyRow = 0, section = null;
+    let headerRow = 0, statusRow = 0, latestRow = 0, fyRow = 0, stampRow = 0, section = null;
     const rows = { sales: {}, ebitda: {} }, inputs = {};
     for (let r = 1; r <= ws.maxRow; r++) {
       const lab = B(r), raw = String(ws.cell("B", r).v || "").trim();
@@ -569,6 +601,7 @@
       if (lab === "status" && headerRow && !statusRow) { statusRow = r; continue; }
       if (lab === "latest reported quarter") { latestRow = r; continue; }
       if (lab === "fiscal year") { fyRow = r; continue; }
+      if (lab.startsWith("actuals filled in by mr. market")) { stampRow = r; continue; }
       if (SECTIONS[lab] !== undefined) { section = SECTIONS[lab]; continue; }
       if (section === "sales") { if (lab.startsWith("eliminations")) rows.elim = r; else if (lab !== "total net sales") rows.sales[raw] = r; }
       else if (section === "ebitda") { if (lab.startsWith("central")) rows.central = r; else if (lab !== "total ebitda") rows.ebitda[raw] = r; }
@@ -581,13 +614,28 @@
         else if (lab.startsWith("earn-outs")) inputs.other = r; else if (lab.startsWith("shares outstanding")) inputs.shares = r;
       }
     }
-    if (!headerRow || !statusRow || !latestRow) return { error: "The transfer sheet layout was not recognised" };
-    const histCols = [];
-    for (let c = 4; c < 40; c++) { const st = norm(ws.cell(c, statusRow).v); if (st === "actual") histCols.push(c); if (ws.cell(c, headerRow).v == null) break; }
-    const full = /^Q[1-4]\s+\d{4}$/.test(String(ws.cell("D", latestRow).v || "").trim());
-    const edits = {};
+    if (!headerRow || !latestRow) return { error: "The transfer sheet layout was not recognised" };
+    const qi = lab => { const m = /^Q([1-4])\s+(\d{4})$/.exec(String(lab || "").trim()); return m ? +m[2] * 4 + +m[1] : null; };
+    const full = qi(ws.cell("D", latestRow).v) != null;
+    const edits = {}, replaced = [], bsChanged = {};
+    if (!opts.historyOnly && +Q[1] === 4) return { error: "At year-end the model needs next year's quarterly forecasts, so please update it yourself", yearEnd: true };
+    if (opts.historyOnly && full) {
+      // the balance sheet belongs to Mr. Market: make it match the sheet's latest reported quarter
+      const qv = k => A.quarterly.value(k, Q);
+      const bs = { netDebt: qv("net debt"), leases: qv("lease liabilities"), other: qv("earn-outs"), shares: qv("shares outstanding") };
+      const day = { 1: "31 Mar", 2: "30 Jun", 3: "30 Sep", 4: "31 Dec" }[+Q[1]] + " " + Q.slice(3);
+      const names = { netDebt: "Net debt", leases: "Lease liabilities", other: "Earn-outs & options", shares: "Shares outstanding" };
+      Object.entries(inputs).forEach(([k, r]) => {
+        if (bs[k] == null) return;
+        const cur = ws.cell("D", r);
+        if (!cur.formula && num(cur.v) != null && Math.abs(num(cur.v) - bs[k]) < (k === "shares" ? 0.005 : 0.5)) return;
+        if (cur.formula) replaced.push(names[k]);
+        edits["D" + r] = { v: bs[k] }; bsChanged[k] = bs[k];
+        const note = ws.cell("E", r).v;
+        if (typeof note === "string" && /\d{1,2} [A-Z][a-z]{2} \d{4}/.test(note)) edits["E" + r] = { s: note.replace(/\d{1,2} [A-Z][a-z]{2} \d{4}/, day) };
+      });
+    }
     if (!opts.historyOnly) {
-      if (+Q[1] === 4) return { error: "At year-end the model needs next year's quarterly forecasts, so please update it yourself", yearEnd: true };
       if (full) edits["D" + latestRow] = { s: Q };
       else {
         const fy = num(ws.cell("D", fyRow).v);
@@ -598,28 +646,39 @@
       const bs = { netDebt: qv("net debt"), leases: qv("lease liabilities"), other: qv("earn-outs"), shares: qv("shares outstanding") };
       if (Object.values(bs).some(v => v == null)) return { error: `The balance sheet for ${Q} is missing in the historical data` };
       const day = { 1: "31 Mar", 2: "30 Jun", 3: "30 Sep", 4: "31 Dec" }[+Q[1]] + " " + Q.slice(3);
+      const names = { netDebt: "Net debt", leases: "Lease liabilities", other: "Earn-outs & options", shares: "Shares outstanding" };
       Object.entries(inputs).forEach(([k, r]) => {
+        if (ws.cell("D", r).formula) replaced.push(names[k]);
         edits["D" + r] = { v: bs[k] };
         const note = ws.cell("E", r).v;
         if (typeof note === "string" && /\d{1,2} [A-Z][a-z]{2} \d{4}/.test(note)) edits["E" + r] = { s: note.replace(/\d{1,2} [A-Z][a-z]{2} \d{4}/, day) };
       });
     }
-    if (full && histCols.length) {
-      const labels = quartersBack(Q, histCols.length);
-      histCols.forEach((c, k) => {
-        const col = colLetters(c), sameLabel = String(ws.cell(c, headerRow).v || "").trim() === labels[k];
-        edits[col + headerRow] = { s: labels[k] };
-        const h = historyRow(A, labels[k]);
-        const put = (r, val) => { if (!r) return; if (opts.onlyEmpty && sameLabel && num(ws.cell(c, r).v) != null) return; edits[col + r] = { v: val }; };
+    if (full) {
+      if (stampRow) edits["D" + stampRow] = { s: Q };
+      let found = false;
+      for (let c = 4; c < 40; c++) {
+        const lab = ws.cell(c, headerRow).v; if (lab == null) break;
+        const k = qi(lab); if (k == null || k > qi(Q)) continue;
+        const col = colLetters(c), isNew = !opts.historyOnly && k === qi(Q);
+        if (k === qi(Q)) found = true;
+        const h = historyRow(A, String(lab).trim());
+        if (!h.hasData) continue;
+        const put = (r, val) => {
+          if (!r) return;
+          if (!isNew && (ws.cell(c, r).formula || ws.cell(c, r).v != null)) return;      // keep what is already there
+          edits[col + r] = val == null ? { s: "n/a" } : { v: val };
+        };
         Object.entries(rows.sales).forEach(([n, r]) => put(r, h.sales(n)));
         Object.entries(rows.ebitda).forEach(([n, r]) => put(r, h.ebitda(n)));
         ["elim", "central", "dep", "amort", "fin", "tax", "capex", "nwc"].forEach(k2 => put(rows[k2], h[k2]));
-      });
+      }
+      if (!found) return { error: `The sheet has no column for ${Q}` };
     }
     if (!Object.keys(edits).length) return { bytes: null, unchanged: true };
-    try { return { bytes: await editWorkbookCells(buf, "Transfer sheet", edits), edits: Object.keys(edits).length }; }
+    try { const r = await editWorkbookCells(buf, "Transfer sheet", edits); return { bytes: r.blob, edits: Object.keys(edits).length, replaced, expanded: r.expanded, bsChanged }; }
     catch (e) { return { error: e.message || String(e) }; }
   }
 
-  window.MMModels = { VERSION: "0.26", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward, refreshHistory, compareHistory, applyQuarterToSheet, quartersBack };
+  window.MMModels = { VERSION: "0.27", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward, refreshHistory, compareHistory, applyQuarterToSheet, quartersBack };
 })();

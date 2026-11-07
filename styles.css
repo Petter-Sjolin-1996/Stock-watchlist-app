@@ -1,4 +1,4 @@
-:root{--mm-version:"0.26"}
+:root{--mm-version:"0.27"}
 :root{
   --bg:#F3F5F8; --surface:#FFFFFF; --ink:#16202A; --muted:#67727D; --line:#E2E6EB; --hover:#F6F8FB;
   --blue:#1B5FAA; --blue-dark:#154C89; --blue-soft:#E7EFF9;
@@ -492,3 +492,10 @@ table.assump th.outdated small{display:block;font-weight:500;font-size:11px;line
 .pill.sm.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
 .cp-banner a{color:var(--blue)}
 @media (max-width:820px){.cp-banner-acts{flex:1 1 100%;flex-wrap:wrap}.cp-banner-acts .pill.sm{white-space:normal;text-align:left}}
+
+/* ---------- one update journey ---------- */
+.rv-apply{display:flex;gap:10px;align-items:flex-start;background:var(--amber-soft);border-radius:12px;padding:12px 14px;margin:0 0 14px;cursor:pointer;font-size:14px}
+.rv-apply input{margin-top:3px;width:18px;height:18px;accent-color:var(--blue)}
+.cp-hint{margin:12px 0 0;font-size:13.5px;color:var(--muted)}
+.cp-hint .link-btn{padding:0;font-size:13.5px}
+.cp-banner .link-btn.sm{padding:4px 0 0;font-size:13px}

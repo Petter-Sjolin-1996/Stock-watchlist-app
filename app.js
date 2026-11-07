@@ -1,6 +1,6 @@
 (function(){
 const $=id=>document.getElementById(id);
-const APP_VERSION="0.27";
+const APP_VERSION="0.28";
 /* ---------- release guard: all files must come from the same release ----------
    While GitHub Pages deploys an update, the browser can briefly get files from two versions.
    If so, show a short notice, refresh the files from the server and reload. */
@@ -784,7 +784,7 @@ function quartersBehind(t,model){
   if(!lr||!A||!A.quarterly||qIndex(model.basis)==null) return out;
   for(let q=qIndex(model.basis)+1;q<=qIndex(lr.quarter);q++){
     const Q=qLabel(q);
-    if(+Q[1]===4){out.yearEnd=Q;break}
+    if(+Q[1]===4&&!model.periods.some(p=>String(p.status).toLowerCase()==="actual")){out.yearEnd=Q;break}
     if(A.quarterly.value("net sales",Q)==null) break;
     out.list.push(Q);
   }

@@ -427,7 +427,11 @@
     const v = arr => (arr && arr[i] != null ? arr[i] : 0), S = A.segments, LY = prevYear(Q);
     const res = MMModels.computeValuation(data), q = k => A.quarterly.value(k, Q);
     if (cat === "sales") {
-      const act = q("net sales"), ly = A.quarterly.value("net sales", LY), acq = q("acquired sales"), fx = q("currency effect");
+      const act = q("net sales"), ly = A.quarterly.value("net sales", LY);
+      // historical file format 1.1: acquired growth and currency in % of last year's sales; older files: SEK m
+      const pctMode = q("acquired growth") != null;
+      const acq = pctMode ? (ly != null ? q("acquired growth") * ly : null) : q("acquired sales");
+      const fx = pctMode ? (ly != null && q("currency effect") != null ? q("currency effect") * ly : null) : q("currency effect");
       const fS = res.sales[i];
       let chart;
       if (act != null && ly != null && acq != null && fx != null) {
@@ -633,5 +637,5 @@
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.28", render, updateValuation, impliedWacc, fvaPopup };
+  window.MMCompany = { VERSION: "0.29", render, updateValuation, impliedWacc, fvaPopup };
 })();

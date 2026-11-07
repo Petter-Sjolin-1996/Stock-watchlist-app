@@ -389,7 +389,8 @@
   function rollForward(model, A, Q) {
     const i = model.periods.findIndex(p => p.label === Q && norm(p.status) === "forecast");
     if (i < 0) return { error: `The model has no forecast for ${Q}` };
-    if (+Q[1] === 4) return { error: "At year-end the model needs next year's quarterly forecasts, so please update it yourself", yearEnd: true };
+    const layoutB = model.periods.some(p => norm(p.status) === "actual");
+    if (+Q[1] === 4 && !layoutB) return { error: "At year-end this older transfer sheet needs to be updated by you", yearEnd: true };
     if (!A || !A.quarterly) return { error: "No historical data" };
     const qv = k => A.quarterly.value(k, Q), S = A.segments;
     const bs = { netDebt: qv("net debt"), leases: qv("lease liabilities"), other: qv("earn-outs"), shares: qv("shares outstanding") };
@@ -398,7 +399,6 @@
     const clone = x => JSON.parse(JSON.stringify(x));
     // value bridge, one change at a time
     const base = computeValuation(model), sh0 = model.inputs.shares;
-    const layoutB = model.periods.some(p => norm(p.status) === "actual");
     const mA = clone(model); mA.periods[i].status = layoutB ? "Actual" : "Reported";
     const v1 = computeValuation(mA).vps;
     const cashRemoved = -(base.pv[i] || 0) / sh0, time = v1 - base.vps - cashRemoved;
@@ -618,7 +618,7 @@
     const qi = lab => { const m = /^Q([1-4])\s+(\d{4})$/.exec(String(lab || "").trim()); return m ? +m[2] * 4 + +m[1] : null; };
     const full = qi(ws.cell("D", latestRow).v) != null;
     const edits = {}, replaced = [], bsChanged = {};
-    if (!opts.historyOnly && +Q[1] === 4) return { error: "At year-end the model needs next year's quarterly forecasts, so please update it yourself", yearEnd: true };
+    if (!opts.historyOnly && +Q[1] === 4 && !full) return { error: "At year-end this older transfer sheet needs to be updated by you", yearEnd: true };
     if (opts.historyOnly && full) {
       // the balance sheet belongs to Mr. Market: make it match the sheet's latest reported quarter
       const qv = k => A.quarterly.value(k, Q);
@@ -680,5 +680,5 @@
     catch (e) { return { error: e.message || String(e) }; }
   }
 
-  window.MMModels = { VERSION: "0.27", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward, refreshHistory, compareHistory, applyQuarterToSheet, quartersBack };
+  window.MMModels = { VERSION: "0.28", readWorkbook, parseTransferSheet, computeValuation, readActuals, rollForward, refreshHistory, compareHistory, applyQuarterToSheet, quartersBack };
 })();

@@ -541,11 +541,13 @@
     if (false) {
     } else if (latest && s.modelStatus && s.modelStatus.kind === "update" && s.lastReport) {
       const lr = s.lastReport, ap = ctx.apply;
-      const applyBtn = ap && !ap.error
-        ? `<button class="pill sm primary" data-action="apply-actuals">Apply ${h.esc(ap.quarter.split(" ")[0])} actuals · ${h.fmt(ap.from)} → ${h.fmt(ap.to)}</button>`
-        : ap && ap.error ? `<button class="pill sm" disabled title="${h.esc(ap.error)}">Apply ${h.esc(ap.quarter.split(" ")[0])} actuals</button>` : "";
-      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(s.name)} published its ${h.esc(lr.quarter)} report on ${h.fmtDate(lr.date)}.</b> Your model still uses forecasts for ${h.esc(lr.quarter)}.${ap && ap.error ? ` <span class="dim">${h.esc(ap.error)}</span>` : ""}${lr.url ? ` <a href="${h.esc(lr.url)}" target="_blank" rel="noopener">Read report</a>` : ""}</span>
-        <span class="cp-banner-acts"><button class="pill sm" data-action="upload">Update my model myself</button>${applyBtn}</span></section>`;
+      const q = ap ? ap.quarter.split(" ")[0] : lr.quarter.split(" ")[0];
+      const main = ap && !ap.error
+        ? `<button class="pill sm primary" data-action="apply-actuals">Update to ${h.esc(q)} actuals · ${h.fmt(ap.from)} → ${h.fmt(ap.to)}</button>`
+        : `<button class="pill sm primary" data-action="upload">Upload your updated model</button>`;
+      html += `<section class="cp-banner"><span class="cp-banner-dot"></span><span><b>${h.esc(s.name)} published its ${h.esc(lr.quarter)} report on ${h.fmtDate(lr.date)}.</b> Your model still uses forecasts for ${h.esc(lr.quarter)}.${ap && ap.error ? ` <span class="dim">${h.esc(ap.error)}.</span>` : ""}${lr.url ? ` <a href="${h.esc(lr.url)}" target="_blank" rel="noopener">Read report</a>` : ""}
+        ${ap && !ap.error ? `<br><button class="link-btn sm" data-action="upload">Already updated your model yourself? Upload it</button>` : ""}</span>
+        <span class="cp-banner-acts">${main}</span></section>`;
     }
 
     // ---- model card
@@ -559,9 +561,10 @@
     } else if (loadingModels && !latest) {
       html += `<p class="dim">Loading your models…</p>`;
     } else if (latest) {
-      html += `<p class="cp-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${h.esc(latest.fileName || "Model")}</b><br><span class="dim small">Uploaded ${day(latest.uploadedAt)} · based on ${h.esc(latest.basis || "–")} · template ${h.esc(latest.templateVersion || "–")}</span></span></p>
+      html += `<p class="cp-file"><svg class="xl"><use href="#i-xl"/></svg><span><b>${h.esc(latest.fileName || "Model")}</b><br><span class="dim small">${latest.applied ? "Updated" : "Uploaded"} ${day(latest.uploadedAt)} · based on ${h.esc(latest.basis || "–")} · template ${h.esc(latest.templateVersion || "–")}</span></span></p>
       <div class="cp-actions"><button class="pill primary" data-action="upload"><svg><use href="#i-up"/></svg>Upload new version</button>
-      <button class="pill" data-action="download-model"><svg><use href="#i-down"/></svg>Download my model</button>${tplBtn}${histBtn}</div>`;
+      <button class="pill" data-action="download-model"><svg><use href="#i-down"/></svg>Download my model</button>${tplBtn}${histBtn}</div>
+      ${latest.applied ? `<p class="cp-hint">Updated with ${h.esc(latest.basis)} actuals. Want to review your assumptions? <button class="link-btn" data-action="download-model">Download your updated model</button>, change what you like and upload it again</p>` : ""}`;
     } else {
       html += `<ol class="steps">
         <li><b>Download the transfer sheet</b> for ${h.esc(s.name)}. ${hasTemplate ? "" : "<span class='dim'>(not available yet)</span>"}</li>
@@ -630,5 +633,5 @@
     el.innerHTML = `<div class="cp">${html}</div>`;
   }
 
-  window.MMCompany = { VERSION: "0.26", render, updateValuation, impliedWacc, fvaPopup };
+  window.MMCompany = { VERSION: "0.27", render, updateValuation, impliedWacc, fvaPopup };
 })();
